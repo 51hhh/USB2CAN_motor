@@ -3,9 +3,14 @@ import sys
 import signal
 from can_driver import CANDriver
 from multi_motor_manager import MultiMotorManager
+from pid import PID
 
 # === 全局变量用于信号处理 ===
 shutdown_flag = False
+# 存储视觉误差 [ID: 误差值]
+visual_errors = {1: 0.0, 2: 0.0}
+# 存储最后更新时间，防止视觉丢失后电机疯转
+last_vision_update = {1: 0.0, 2: 0.0}
 
 def signal_handler(sig, frame):
     """处理 Ctrl+C 信号"""
@@ -39,16 +44,19 @@ if USE_ROS:
             sys.exit(1)
         
         # 定义更新回调
-        def on_angle_update(motor_id, new_angle):
-            """当ROS话题更新角度时触发"""
-            if motor_id in manager.motors:
-                manager.set_target_angle(motor_id, new_angle)
-                print(f"[ROS更新] 电机{motor_id} -> {new_angle}°")
+        def on_vision_update(motor_id, error_val):
+            """
+            当ROS话题更新时触发
+            motor_id 1: X轴误差
+            motor_id 2: Y轴误差
+            """
+            visual_errors[motor_id] = error_val
+            last_vision_update[motor_id] = time.time() # 记录时间戳
         
         # 注册回调
-        ros_angle_updater.register_callback(on_angle_update)
+        ros_angle_updater.register_callback(on_vision_update)
         
-        print("[主程序] ROS模式已启用")
+        print("[主程序] ROS视觉追踪模式已启用")
         print("[提示] 按 Ctrl+C 可随时退出\n")
         ROS_ENABLED = True
         
@@ -71,14 +79,18 @@ else:
 MOTOR_CONFIGS = [
     {
         'id': 1,
-        'target_angle': 90.0,
-        'speed_pid': {'kp': 30.0, 'ki': 1.0, 'kd': 0.0, 'i_max': 300, 'out_max': 5000, 'dead_zone': 5},
+        'target_angle': 150.0,
+        'min_angle': 60.0,   # 限制范围
+        'max_angle': 270.0,
+        'speed_pid': {'kp': 30.0, 'ki': 1.0, 'kd': 0.0, 'i_max': 300, 'out_max': 4000, 'dead_zone': 5},
         'angle_pid': {'kp': 10.0, 'ki': 1.0, 'kd': 0.0, 'i_max': 10, 'out_max': 200, 'dead_zone': 0.5}
     },
     {
         'id': 2,
         'target_angle': 180.0,
-        'speed_pid': {'kp': 30.0, 'ki': 1.0, 'kd': 0.0, 'i_max': 300, 'out_max': 5000, 'dead_zone': 5},
+        'min_angle': 0.0,    # 限制范围
+        'max_angle': 360.0,
+        'speed_pid': {'kp': 30.0, 'ki': 1.0, 'kd': 0.0, 'i_max': 300, 'out_max': 4000, 'dead_zone': 5},
         'angle_pid': {'kp': 10.0, 'ki': 1.0, 'kd': 0.0, 'i_max': 10, 'out_max': 200, 'dead_zone': 0.5}
     },
 ]
@@ -96,6 +108,12 @@ for config in MOTOR_CONFIGS:
         angle_pid_params=config['angle_pid']
     )
 
+# === 视觉追踪 PID ===
+# 输入: 像素误差 (Target=0, Feedback=Error)
+# 输出: 角度增量
+vis_pid_x = PID(kp=0.001, ki=0.0, kd=0.0001, i_max=0, out_max=3.0, dead_zone=1.0)
+vis_pid_y = PID(kp=0.001, ki=0.0, kd=0.0001, i_max=1, out_max=3.0, dead_zone=1.0)
+
 # === 主控制循环 ===
 try:
     print("开始多电机双环控制")
@@ -108,17 +126,55 @@ try:
 
     loop_count = 0
     
-    # 统一的循环条件：检查 shutdown_flag 和 ROS 状态
     while not shutdown_flag:
-        # ROS模式下额外检查 rospy 是否被关闭
         if ROS_ENABLED and rospy.is_shutdown():
             break
+        
+        # --- 视觉追踪逻辑 ---
+        if ROS_ENABLED:
+            current_time = time.time()
+            
+            # 处理 ID2 (X轴)
+            # 1. 超时保护 (0.5秒无数据则停止追踪)
+            if current_time - last_vision_update.get(1, 0) > 0.5:
+                err_x = 0.0
+            else:
+                err_x = visual_errors.get(1, 0.0)
+            
+            # 2. PID计算 (负反馈: 目标0 - 误差)
+            delta_x = vis_pid_x.calc(0.0, err_x)
+            
+            # 处理 ID1 (Y轴)
+            if current_time - last_vision_update.get(2, 0) > 0.5:
+                err_y = 0.0
+            else:
+                err_y = visual_errors.get(2, 0.0)
+            
+            delta_y = vis_pid_y.calc(0.0, err_y)
+            
+
+            # 3. 更新目标角度 (累加并限幅)
+            if 1 in manager.motors:
+                curr = manager.motors[1].target_angle
+                new_angle = curr + delta_y
+                # 限幅 60-270
+                new_angle = max(60.0, min(new_angle, 270.0))
+                manager.set_target_angle(1, new_angle)
+                
+            if 2 in manager.motors:
+                curr = manager.motors[2].target_angle
+                new_angle = curr + delta_x
+                # 限幅 0-360
+                new_angle = max(0.0, min(new_angle, 360.0))
+                manager.set_target_angle(2, new_angle)
         
         # 发送所有电机的控制命令
         manager.send_commands()
         
-        # 每50次循环打印一次状态 (约0.25秒)
+        # 每50次循环打印一次状态
         if loop_count % 50 == 0:
+            if ROS_ENABLED:
+                print(f"[视觉] Err X:{visual_errors.get(1,0):.1f} Y:{visual_errors.get(2,0):.1f}")
             manager.print_status()
             print()
         
@@ -126,7 +182,6 @@ try:
         time.sleep(0.005)  # 200Hz
 
 except KeyboardInterrupt:
-    # 这个分支在某些情况下仍会触发（如非ROS模式）
     print("\n🛑 收到键盘中断...")
 except Exception as e:
     print(f"\n❌ 错误: {e}")
@@ -137,7 +192,6 @@ finally:
     manager.stop_all()
     driver.running = False
     
-    # ROS模式下主动关闭节点
     if ROS_ENABLED:
         try:
             rospy.signal_shutdown("用户请求退出")
