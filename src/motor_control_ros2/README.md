@@ -57,4 +57,9 @@ ros2 topic pub /damiao_motor_command motor_control_ros2/msg/DamiaoMotorCommand \
 
 ## 文档
 
-详细文档请查看 `walkthrough.md`。
+- **用户手册**：详细操作指南请见 [USER_MANUAL.md](USER_MANUAL.md)
+- **开发日志**：开发过程记录请见 `walkthrough.md`
+
+## 快速参考
+
+查看 `USER_MANUAL.md` 获取完整的配置和故障排除指南。
