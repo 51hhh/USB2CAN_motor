@@ -2,6 +2,8 @@ msg/ControlFrequency.idl
 msg/ControlFrequency.msg
 msg/DJIMotorCommand.idl
 msg/DJIMotorCommand.msg
+msg/DJIMotorCommandAdvanced.idl
+msg/DJIMotorCommandAdvanced.msg
 msg/DJIMotorState.idl
 msg/DJIMotorState.msg
 msg/DamiaoMotorCommand.idl
@@ -18,15 +20,3 @@ msg/UnitreeMotorCommand.idl
 msg/UnitreeMotorCommand.msg
 msg/UnitreeMotorState.idl
 msg/UnitreeMotorState.msg
-srv/MotorEnable.idl
-srv/MotorEnable.srv
-srv/MotorEnable_Request.msg
-srv/MotorEnable_Response.msg
-srv/MotorSetZero.idl
-srv/MotorSetZero.srv
-srv/MotorSetZero_Request.msg
-srv/MotorSetZero_Response.msg
-srv/MotorSwitchMode.idl
-srv/MotorSwitchMode.srv
-srv/MotorSwitchMode_Request.msg
-srv/MotorSwitchMode_Response.msg

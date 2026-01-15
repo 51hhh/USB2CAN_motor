@@ -16,6 +16,7 @@
 
 #include "motor_control_ros2/msg/dji_motor_state.hpp"
 #include "motor_control_ros2/msg/dji_motor_command.hpp"
+#include "motor_control_ros2/msg/dji_motor_command_advanced.hpp"
 #include "motor_control_ros2/msg/damiao_motor_state.hpp"
 #include "motor_control_ros2/msg/damiao_motor_command.hpp"
 #include "motor_control_ros2/msg/unitree_motor_state.hpp"
@@ -23,6 +24,8 @@
 #include "motor_control_ros2/msg/unitree_go8010_state.hpp"
 #include "motor_control_ros2/msg/unitree_go8010_command.hpp"
 #include "motor_control_ros2/msg/control_frequency.hpp"
+
+#include <yaml-cpp/yaml.h>
 
 #include <iostream>
 #include <iomanip>
@@ -60,10 +63,17 @@ namespace motor_control {
 class MotorControlNode : public rclcpp::Node {
 public:
   MotorControlNode() : Node("motor_control_node") {
-    // 声明参数
-    this->declare_parameter("control_frequency", 500.0);
-    this->declare_parameter("publish_frequency", 100.0);
+    // 声明参数（使用 200Hz 作为默认值，与 Python 一致）
+    this->declare_parameter("control_frequency", 200.0);
     this->declare_parameter("config_file", "");
+    
+    // 尝试从 control_params.yaml 加载控制参数
+    try {
+      std::string control_params_file = ament_index_cpp::get_package_share_directory("motor_control_ros2") + "/config/control_params.yaml";
+      loadControlParams(control_params_file);
+    } catch (const std::exception& e) {
+      RCLCPP_WARN(this->get_logger(), "控制参数加载失败: %s，使用默认参数", e.what());
+    }
     
     // 获取配置文件路径
     std::string config_file = this->get_parameter("config_file").as_string();
@@ -91,6 +101,14 @@ public:
       initializeMotors();  // 回退到硬编码配置
     }
     
+    // 加载 PID 参数配置
+    std::string pid_config_file = ament_index_cpp::get_package_share_directory("motor_control_ros2") + "/config/pid_params.yaml";
+    try {
+      loadPIDParams(pid_config_file);
+    } catch (const std::exception& e) {
+      RCLCPP_WARN(this->get_logger(), "PID 参数加载失败: %s，使用默认参数", e.what());
+    }
+    
     // 启动 CAN 接收
     can_network_->startAll();
     
@@ -100,25 +118,19 @@ public:
     // 创建订阅者
     createSubscribers();
     
-    // 启动控制循环
+    // 启动控制循环（同时发布电机状态）
     double control_freq = this->get_parameter("control_frequency").as_double();
+    target_control_freq_ = control_freq;  // 保存目标频率用于发布
     control_timer_ = this->create_wall_timer(
       std::chrono::microseconds(static_cast<int>(1e6 / control_freq)),
       std::bind(&MotorControlNode::controlLoop, this)
     );
     
-    // 启动发布循环
-    double publish_freq = this->get_parameter("publish_frequency").as_double();
-    publish_timer_ = this->create_wall_timer(
-      std::chrono::milliseconds(static_cast<int>(1000 / publish_freq)),
-      std::bind(&MotorControlNode::publishStates, this)
-    );
-    
     // 初始化频率统计
     last_freq_report_time_ = this->now();
     
-    RCLCPP_INFO(this->get_logger(), "电机控制节点已启动 - 控制频率: %.1f Hz, 发布频率: %.1f Hz",
-                control_freq, publish_freq);
+    RCLCPP_INFO(this->get_logger(), "电机控制节点已启动 - 控制频率: %.1f Hz",
+                control_freq);
   }
   
   ~MotorControlNode() {
@@ -316,10 +328,16 @@ private:
   }
   
   void createSubscribers() {
-    // DJI 电机命令订阅者
+    // DJI 电机命令订阅者（基础命令，向后兼容）
     dji_cmd_sub_ = this->create_subscription<motor_control_ros2::msg::DJIMotorCommand>(
       "dji_motor_command", 10,
       std::bind(&MotorControlNode::djiCommandCallback, this, std::placeholders::_1)
+    );
+    
+    // DJI 电机高级命令订阅者（支持位置/速度/直接输出）
+    dji_cmd_advanced_sub_ = this->create_subscription<motor_control_ros2::msg::DJIMotorCommandAdvanced>(
+      "dji_motor_command_advanced", 10,
+      std::bind(&MotorControlNode::djiCommandAdvancedCallback, this, std::placeholders::_1)
     );
     
     // 达妙电机命令订阅者
@@ -356,7 +374,7 @@ private:
   }
   
   void controlLoop() {
-    // 500Hz 控制循环
+    // 控制循环（频率由 control_frequency 参数决定）
     
     // 频率统计
     control_loop_count_++;
@@ -366,23 +384,24 @@ private:
       actual_control_freq_ = control_loop_count_ / dt;
       control_loop_count_ = 0;
       last_freq_report_time_ = now;
-      
-      // 每5秒输出一次频率信息
-      static int report_count = 0;
-      if (++report_count >= 5) {
-        RCLCPP_INFO(this->get_logger(), "控制频率: %.1f Hz (目标: 500 Hz)", 
-                    actual_control_freq_);
-        report_count = 0;
-      }
     }
     
     // 1. 读取电机状态
     readUnitreeMotors();
     
-    // 2. 写入电机命令
+    // 2. 更新 DJI 电机控制器（PID 计算）
+    // 与 Python 实现一致，不传递 dt 参数
+    for (auto& motor : dji_motors_) {
+      motor->updateController();
+    }
+    
+    // 3. 写入电机命令
     writeDJIMotors();
     writeDamiaoMotors();
     writeUnitreeMotors();
+    
+    // 4. 发布电机状态（每次控制循环都发布）
+    publishStates();
   }
 
   void readUnitreeMotors() {
@@ -608,6 +627,179 @@ private:
       }
     }
   }
+  
+  /**
+   * @brief DJI 电机高级命令回调（支持位置/速度/直接输出）
+   */
+  void djiCommandAdvancedCallback(const motor_control_ros2::msg::DJIMotorCommandAdvanced::SharedPtr msg) {
+    auto it = motors_.find(msg->joint_name);
+    if (it == motors_.end()) {
+      RCLCPP_WARN(this->get_logger(), "[CMD ADV] 未找到电机: %s", msg->joint_name.c_str());
+      return;
+    }
+    
+    auto dji = std::dynamic_pointer_cast<DJIMotor>(it->second);
+    if (!dji) {
+      RCLCPP_WARN(this->get_logger(), "[CMD ADV] 电机 %s 不是 DJI 电机", msg->joint_name.c_str());
+      return;
+    }
+    
+    // 设置控制模式
+    ControlMode mode = static_cast<ControlMode>(msg->mode);
+    dji->setControlMode(mode);
+    
+    // 根据模式设置目标值
+    switch (mode) {
+      case ControlMode::POSITION:
+        dji->setPositionTarget(msg->position_target);
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                             "[CMD ADV] %s 位置控制: %.3f rad", 
+                             msg->joint_name.c_str(), msg->position_target);
+        break;
+        
+      case ControlMode::VELOCITY:
+        dji->setVelocityTarget(msg->velocity_target);
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                             "[CMD ADV] %s 速度控制: %.3f rad/s", 
+                             msg->joint_name.c_str(), msg->velocity_target);
+        break;
+        
+      case ControlMode::DIRECT:
+      default:
+        dji->setOutput(msg->direct_output);
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                             "[CMD ADV] %s 直接输出: %d", 
+                             msg->joint_name.c_str(), msg->direct_output);
+        break;
+    }
+  }
+  
+  /**
+   * @brief 加载控制参数配置
+   */
+  void loadControlParams(const std::string& config_file) {
+    RCLCPP_INFO(this->get_logger(), "正在加载控制参数: %s", config_file.c_str());
+    
+    YAML::Node config = YAML::LoadFile(config_file);
+    
+    if (config["motor_control_node"] && config["motor_control_node"]["ros__parameters"]) {
+      auto params = config["motor_control_node"]["ros__parameters"];
+      
+      if (params["control_frequency"]) {
+        double freq = params["control_frequency"].as<double>();
+        this->set_parameter(rclcpp::Parameter("control_frequency", freq));
+        RCLCPP_INFO(this->get_logger(), "控制频率设置为: %.1f Hz", freq);
+      }
+    }
+  }
+  
+  /**
+   * @brief 加载 PID 参数配置
+   */
+  void loadPIDParams(const std::string& config_file) {
+    RCLCPP_INFO(this->get_logger(), "正在加载 PID 参数: %s", config_file.c_str());
+    
+    YAML::Node config = YAML::LoadFile(config_file);
+    
+    if (!config["dji_motors"]) {
+      RCLCPP_WARN(this->get_logger(), "配置文件中未找到 dji_motors 节点");
+      return;
+    }
+    
+    // 加载每种电机类型的默认参数
+    std::map<std::string, std::pair<PIDParams, PIDParams>> type_params;
+    
+    for (auto type_node : config["dji_motors"]) {
+      std::string motor_type = type_node.first.as<std::string>();
+      
+      PIDParams pos_pid, vel_pid;
+      
+      // 位置环参数
+      if (type_node.second["position_pid"]) {
+        auto pos = type_node.second["position_pid"];
+        pos_pid.kp = pos["kp"].as<double>();
+        pos_pid.ki = pos["ki"].as<double>();
+        pos_pid.kd = pos["kd"].as<double>();
+        pos_pid.i_max = pos["i_max"].as<double>();
+        pos_pid.out_max = pos["out_max"].as<double>();
+        pos_pid.dead_zone = pos["dead_zone"].as<double>();
+      }
+      
+      // 速度环参数
+      if (type_node.second["velocity_pid"]) {
+        auto vel = type_node.second["velocity_pid"];
+        vel_pid.kp = vel["kp"].as<double>();
+        vel_pid.ki = vel["ki"].as<double>();
+        vel_pid.kd = vel["kd"].as<double>();
+        vel_pid.i_max = vel["i_max"].as<double>();
+        vel_pid.out_max = vel["out_max"].as<double>();
+        vel_pid.dead_zone = vel["dead_zone"].as<double>();
+      }
+      
+      type_params[motor_type] = {pos_pid, vel_pid};
+      
+      RCLCPP_INFO(this->get_logger(), "加载 %s 默认 PID 参数: Pos(%.1f,%.1f,%.1f) Vel(%.1f,%.1f,%.1f)",
+                  motor_type.c_str(),
+                  pos_pid.kp, pos_pid.ki, pos_pid.kd,
+                  vel_pid.kp, vel_pid.ki, vel_pid.kd);
+    }
+    
+    // 应用参数到所有 DJI 电机
+    for (auto& motor : dji_motors_) {
+      std::string motor_type = (motor->getMotorType() == MotorType::DJI_GM6020) ? "GM6020" : "GM3508";
+      
+      if (type_params.find(motor_type) != type_params.end()) {
+        motor->setPositionPID(type_params[motor_type].first);
+        motor->setVelocityPID(type_params[motor_type].second);
+        
+        RCLCPP_INFO(this->get_logger(), "电机 %s (%s) 已应用 PID 参数",
+                    motor->getJointName().c_str(), motor_type.c_str());
+      }
+    }
+    
+    // 加载电机特定覆盖参数
+    if (config["motor_overrides"]) {
+      for (auto override_node : config["motor_overrides"]) {
+        std::string motor_name = override_node.first.as<std::string>();
+        
+        auto it = motors_.find(motor_name);
+        if (it != motors_.end()) {
+          auto dji = std::dynamic_pointer_cast<DJIMotor>(it->second);
+          if (dji) {
+            // 覆盖位置环参数
+            if (override_node.second["position_pid"]) {
+              auto pos = override_node.second["position_pid"];
+              PIDParams pos_pid;
+              pos_pid.kp = pos["kp"] ? pos["kp"].as<double>() : dji->getPositionPIDParams().kp;
+              pos_pid.ki = pos["ki"] ? pos["ki"].as<double>() : dji->getPositionPIDParams().ki;
+              pos_pid.kd = pos["kd"] ? pos["kd"].as<double>() : dji->getPositionPIDParams().kd;
+              pos_pid.i_max = pos["i_max"] ? pos["i_max"].as<double>() : dji->getPositionPIDParams().i_max;
+              pos_pid.out_max = pos["out_max"] ? pos["out_max"].as<double>() : dji->getPositionPIDParams().out_max;
+              pos_pid.dead_zone = pos["dead_zone"] ? pos["dead_zone"].as<double>() : dji->getPositionPIDParams().dead_zone;
+              dji->setPositionPID(pos_pid);
+            }
+            
+            // 覆盖速度环参数
+            if (override_node.second["velocity_pid"]) {
+              auto vel = override_node.second["velocity_pid"];
+              PIDParams vel_pid;
+              vel_pid.kp = vel["kp"] ? vel["kp"].as<double>() : dji->getVelocityPIDParams().kp;
+              vel_pid.ki = vel["ki"] ? vel["ki"].as<double>() : dji->getVelocityPIDParams().ki;
+              vel_pid.kd = vel["kd"] ? vel["kd"].as<double>() : dji->getVelocityPIDParams().kd;
+              vel_pid.i_max = vel["i_max"] ? vel["i_max"].as<double>() : dji->getVelocityPIDParams().i_max;
+              vel_pid.out_max = vel["out_max"] ? vel["out_max"].as<double>() : dji->getVelocityPIDParams().out_max;
+              vel_pid.dead_zone = vel["dead_zone"] ? vel["dead_zone"].as<double>() : dji->getVelocityPIDParams().dead_zone;
+              dji->setVelocityPID(vel_pid);
+            }
+            
+            RCLCPP_INFO(this->get_logger(), "电机 %s 已应用覆盖参数", motor_name.c_str());
+          }
+        }
+      }
+    }
+    
+    RCLCPP_INFO(this->get_logger(), "PID 参数加载完成");
+  }
 
 private:
   std::shared_ptr<hardware::CANNetwork> can_network_;
@@ -615,7 +807,6 @@ private:
   std::vector<std::shared_ptr<DJIMotor>> dji_motors_;
   
   rclcpp::TimerBase::SharedPtr control_timer_;
-  rclcpp::TimerBase::SharedPtr publish_timer_;
   
   rclcpp::Publisher<motor_control_ros2::msg::DJIMotorState>::SharedPtr dji_state_pub_;
   rclcpp::Publisher<motor_control_ros2::msg::DamiaoMotorState>::SharedPtr damiao_state_pub_;
@@ -624,6 +815,7 @@ private:
   rclcpp::Publisher<motor_control_ros2::msg::ControlFrequency>::SharedPtr control_freq_pub_;
   
   rclcpp::Subscription<motor_control_ros2::msg::DJIMotorCommand>::SharedPtr dji_cmd_sub_;
+  rclcpp::Subscription<motor_control_ros2::msg::DJIMotorCommandAdvanced>::SharedPtr dji_cmd_advanced_sub_;
   rclcpp::Subscription<motor_control_ros2::msg::DamiaoMotorCommand>::SharedPtr damiao_cmd_sub_;
   rclcpp::Subscription<motor_control_ros2::msg::UnitreeMotorCommand>::SharedPtr unitree_cmd_sub_;
   rclcpp::Subscription<motor_control_ros2::msg::UnitreeGO8010Command>::SharedPtr unitree_go_cmd_sub_;
@@ -639,7 +831,7 @@ private:
   rclcpp::Time last_freq_report_time_;
   double actual_control_freq_ = 0.0;
   double actual_can_tx_freq_ = 0.0;
-  double target_control_freq_ = 500.0;
+  double target_control_freq_ = 200.0;  // 默认值，会被配置文件覆盖
 };
 
 } // namespace motor_control

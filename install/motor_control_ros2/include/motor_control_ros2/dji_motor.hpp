@@ -2,6 +2,7 @@
 #define MOTOR_CONTROL_ROS2__DJI_MOTOR_HPP_
 
 #include "motor_control_ros2/motor_base.hpp"
+#include "motor_control_ros2/cascade_controller.hpp"
 #include <cstdint>
 
 namespace motor_control {
@@ -61,6 +62,75 @@ public:
    * @param bytes 输出 2 字节数组
    */
   void getControlBytes(uint8_t bytes[2]) const;
+  
+  // ========== 串级控制接口 ==========
+  
+  /**
+   * @brief 设置控制模式
+   */
+  void setControlMode(ControlMode mode);
+  
+  /**
+   * @brief 获取控制模式
+   */
+  ControlMode getControlMode() const;
+  
+  /**
+   * @brief 设置位置目标（度，0-360）
+   */
+  void setPositionTarget(double position);
+  
+  /**
+   * @brief 设置速度目标（RPM）
+   */
+  void setVelocityTarget(double velocity);
+  
+  /**
+   * @brief 设置位置环 PID 参数
+   */
+  void setPositionPID(const PIDParams& params);
+  
+  /**
+   * @brief 设置速度环 PID 参数
+   */
+  void setVelocityPID(const PIDParams& params);
+  
+  /**
+   * @brief 更新控制器（在控制循环中调用）
+   * 
+   * 使用度和 RPM 作为内部单位，与 Python 实现一致。
+   */
+  void updateController();
+  
+  /**
+   * @brief 获取位置环 PID 参数
+   */
+  const PIDParams& getPositionPIDParams() const {
+    return cascade_controller_.getPositionPIDParams();
+  }
+  
+  /**
+   * @brief 获取速度环 PID 参数
+   */
+  const PIDParams& getVelocityPIDParams() const {
+    return cascade_controller_.getVelocityPIDParams();
+  }
+  
+  /**
+   * @brief 获取角度（度，0-360）
+   * 与 Python 实现一致的单位
+   */
+  double getAngleDegrees() const {
+    return (raw_angle_ / 8191.0) * 360.0;
+  }
+  
+  /**
+   * @brief 获取转速（RPM）
+   * 与 Python 实现一致的单位
+   */
+  int16_t getRPM() const {
+    return raw_rpm_;
+  }
 
 private:
   uint8_t motor_id_;           // 电机 ID (1-8)
@@ -75,6 +145,11 @@ private:
   int16_t raw_rpm_;
   int16_t raw_current_;
   uint8_t raw_temp_;
+  
+  // 串级控制
+  CascadeController cascade_controller_;  // 串级控制器
+  double position_target_;                // 位置目标（弧度）
+  double velocity_target_;                // 速度目标（弧度/秒）
 };
 
 } // namespace motor_control

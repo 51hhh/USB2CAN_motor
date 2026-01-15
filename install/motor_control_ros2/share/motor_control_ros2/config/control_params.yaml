@@ -1,5 +1,4 @@
 motor_control_node:
   ros__parameters:
-    control_frequency: 500.0     # Hz
-    publish_frequency: 100.0     # Hz
+    control_frequency: 200.0     # Hz - 控制循环和状态发布频率
     config_file: "config/motors.yaml"

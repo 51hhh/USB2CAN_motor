@@ -79,12 +79,7 @@ public:
       std::bind(&MotorMonitorNode::updateDisplay, this)
     );
     
-    // 统计计数器
-    display_count_ = 0;
-    last_stat_time_ = this->now();
-    actual_display_hz_ = 0.0;
-    
-    RCLCPP_INFO(this->get_logger(), "电机监控节点已启动 - 刷新频率: 100 Hz");
+    RCLCPP_INFO(this->get_logger(), "电机监控节点已启动");
   }
   
   ~MotorMonitorNode() {
@@ -127,7 +122,6 @@ private:
   
   void controlFreqCallback(const motor_control_ros2::msg::ControlFrequency::SharedPtr msg) {
     control_freq_ = msg->control_frequency;
-    can_tx_freq_ = msg->can_tx_frequency;
     target_freq_ = msg->target_frequency;
   }
   
@@ -193,17 +187,6 @@ private:
   }
   
   void updateDisplay() {
-    display_count_++;
-    
-    // 计算实际显示频率
-    auto now = this->now();
-    auto dt = (now - last_stat_time_).seconds();
-    if (dt >= 1.0) {
-      actual_display_hz_ = display_count_ / dt;
-      display_count_ = 0;
-      last_stat_time_ = now;
-    }
-    
     std::ostringstream oss;
     
     // 移动光标到顶部
@@ -216,13 +199,7 @@ private:
         << "╚═══════════════════════════════════════════════════════════════════════════════╝"
         << COLOR_RESET << "\n\n";
     
-    // 系统信息
-    oss << COLOR_DIM << "运行时间: " << std::fixed << std::setprecision(1) << now.seconds() << "s  "
-        << "显示频率: " << COLOR_GREEN << std::setprecision(1) << actual_display_hz_ << " Hz" << COLOR_DIM
-        << "  目标: 100 Hz"
-        << COLOR_RESET << "\n";
-    
-    // 控制频率信息
+    // 控制频率信息（简化显示）
     oss << COLOR_DIM << "控制频率: ";
     if (control_freq_ > 0) {
       if (control_freq_ >= target_freq_ * 0.95) {
@@ -233,7 +210,6 @@ private:
         oss << COLOR_RED;
       }
       oss << std::setprecision(1) << control_freq_ << " Hz" << COLOR_DIM
-          << "  CAN发送: " << COLOR_GREEN << std::setprecision(1) << can_tx_freq_ << " Hz" << COLOR_DIM
           << "  目标: " << target_freq_ << " Hz";
     } else {
       oss << COLOR_RED << "等待数据...";
@@ -378,13 +354,7 @@ private:
   
   // 控制频率数据
   double control_freq_ = 0.0;
-  double can_tx_freq_ = 0.0;
-  double target_freq_ = 500.0;
-  
-  // 显示统计
-  int display_count_;
-  rclcpp::Time last_stat_time_;
-  double actual_display_hz_;
+  double target_freq_ = 0.0;  // 从 ControlFrequency 消息获取
   
   // 心跳超时
   double heartbeat_timeout_ms_;

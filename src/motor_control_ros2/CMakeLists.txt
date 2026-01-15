@@ -16,11 +16,12 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 
-# 消息和服务生成
+# 消息生成（不再使用服务）
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/MotorStateGeneric.msg"
   "msg/DJIMotorState.msg"
   "msg/DJIMotorCommand.msg"
+  "msg/DJIMotorCommandAdvanced.msg"
   "msg/DamiaoMotorState.msg"
   "msg/DamiaoMotorCommand.msg"
   "msg/UnitreeMotorState.msg"
@@ -28,9 +29,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/UnitreeGO8010State.msg"
   "msg/UnitreeGO8010Command.msg"
   "msg/ControlFrequency.msg"
-  "srv/MotorEnable.srv"
-  "srv/MotorSetZero.srv"
-  "srv/MotorSwitchMode.srv"
   DEPENDENCIES std_msgs sensor_msgs geometry_msgs
 )
 
@@ -111,26 +109,10 @@ install(DIRECTORY include/
   DESTINATION include
 )
 
-# 安装配置文件和启动文件
+# 安装配置文件
 install(DIRECTORY
   config
-  launch
   DESTINATION share/${PROJECT_NAME}
 )
-
-# 测试 (待文件创建后开启)
-# if(BUILD_TESTING)
-#   find_package(ament_lint_auto REQUIRED)
-#   ament_lint_auto_find_test_dependencies()
-#   
-#   # C++ 测试
-#   find_package(ament_cmake_gtest REQUIRED)
-#   # ament_add_gtest(test_dji_motor test/test_dji_motor.cpp)
-#   # target_link_libraries(test_dji_motor motor_control_lib)
-#   
-#   # Python 测试
-#   find_package(ament_cmake_pytest REQUIRED)
-#   # ament_add_pytest_test(test_config test/test_config.py)
-# endif()
 
 ament_package()

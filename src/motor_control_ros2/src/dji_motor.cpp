@@ -1,6 +1,7 @@
 #include "motor_control_ros2/dji_motor.hpp"
 #include <cstring>
 #include <iostream>
+#include <iomanip>
 #include <chrono>
 
 namespace motor_control {
@@ -17,6 +18,8 @@ DJIMotor::DJIMotor(const std::string& joint_name, MotorType type,
   , raw_rpm_(0)
   , raw_current_(0)
   , raw_temp_(0)
+  , position_target_(0.0)
+  , velocity_target_(0.0)
 {
   if (type == MotorType::DJI_GM6020) {
     // GM6020 配置
@@ -29,6 +32,9 @@ DJIMotor::DJIMotor(const std::string& joint_name, MotorType type,
     control_id_ = (motor_id <= 4) ? 0x200 : 0x1FF;
     max_output_ = 16384;  // 电流限幅
   }
+  
+  // 默认为直接输出模式
+  cascade_controller_.setMode(ControlMode::DIRECT);
 }
 
 void DJIMotor::updateFeedback(uint32_t can_id, const uint8_t* data, size_t len) {
@@ -53,11 +59,10 @@ void DJIMotor::updateFeedback(uint32_t can_id, const uint8_t* data, size_t len) 
   
   // 调试日志（仅在首次上线或定期输出）
   static int feedback_count = 0;
-  if (feedback_count++ % 500 == 0) {  // 每500次输出一次（约1秒@500Hz）
-    std::cout << "[DJI " << joint_name_ << "] Online! "
-              << "Angle=" << raw_angle_ 
-              << " RPM=" << raw_rpm_ 
-              << " Current=" << raw_current_ 
+  if (feedback_count++ % 100 == 0) {  // 每100次输出一次
+    std::cout << "[DJI " << joint_name_ << "] "
+              << "Angle=" << std::fixed << std::setprecision(1) << getAngleDegrees() << "° "
+              << "RPM=" << raw_rpm_ 
               << " Temp=" << static_cast<int>(raw_temp_) << "°C" << std::endl;
   }
 }
@@ -85,6 +90,46 @@ void DJIMotor::getControlBytes(uint8_t bytes[2]) const {
   // Big Endian
   bytes[0] = (target_output_ >> 8) & 0xFF;
   bytes[1] = target_output_ & 0xFF;
+}
+
+// ========== 串级控制实现 ==========
+
+void DJIMotor::setControlMode(ControlMode mode) {
+  cascade_controller_.setMode(mode);
+}
+
+ControlMode DJIMotor::getControlMode() const {
+  return cascade_controller_.getMode();
+}
+
+void DJIMotor::setPositionTarget(double position) {
+  position_target_ = position;
+}
+
+void DJIMotor::setVelocityTarget(double velocity) {
+  velocity_target_ = velocity;
+}
+
+void DJIMotor::setPositionPID(const PIDParams& params) {
+  cascade_controller_.setPositionPID(params);
+}
+
+void DJIMotor::setVelocityPID(const PIDParams& params) {
+  cascade_controller_.setVelocityPID(params);
+}
+
+void DJIMotor::updateController() {
+  // 使用度和 RPM 作为单位，与 Python 实现一致
+  double output = cascade_controller_.update(
+    position_target_,                    // 位置目标 (度)
+    velocity_target_,                    // 速度目标 (RPM)
+    static_cast<double>(target_output_), // 直接输出
+    getAngleDegrees(),                   // 位置反馈 (度, 0-360)
+    static_cast<double>(raw_rpm_)        // 速度反馈 (RPM)
+  );
+  
+  // 将输出转换为 int16 并设置
+  setOutput(static_cast<int16_t>(output));
 }
 
 } // namespace motor_control
