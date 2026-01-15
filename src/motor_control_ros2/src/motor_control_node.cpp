@@ -9,8 +9,8 @@
 #include "motor_control_ros2/dji_motor.hpp"
 #include "motor_control_ros2/damiao_motor.hpp"
 #include "motor_control_ros2/unitree_motor.hpp"
-#include "motor_control_ros2/can_driver.hpp"
-#include "motor_control_ros2/serial_port.hpp"
+#include "motor_control_ros2/hardware/can_interface.hpp"
+#include "motor_control_ros2/hardware/serial_interface.hpp"
 
 #include "motor_control_ros2/msg/dji_motor_state.hpp"
 #include "motor_control_ros2/msg/dji_motor_command.hpp"
@@ -20,6 +20,27 @@
 #include "motor_control_ros2/msg/unitree_motor_command.hpp"
 #include "motor_control_ros2/msg/unitree_go8010_state.hpp"
 #include "motor_control_ros2/msg/unitree_go8010_command.hpp"
+
+#include <iostream>
+#include <iomanip>
+#include <sstream>
+
+// ANSI 颜色代码
+#define COLOR_RESET   "\033[0m"
+#define COLOR_RED     "\033[31m"
+#define COLOR_GREEN   "\033[32m"
+#define COLOR_YELLOW  "\033[33m"
+#define COLOR_BLUE    "\033[34m"
+#define COLOR_MAGENTA "\033[35m"
+#define COLOR_CYAN    "\033[36m"
+#define COLOR_BOLD    "\033[1m"
+#define COLOR_DIM     "\033[2m"
+
+// 清屏和光标控制
+#define CLEAR_SCREEN  "\033[2J"
+#define CURSOR_HOME   "\033[H"
+#define CURSOR_HIDE   "\033[?25l"
+#define CURSOR_SHOW   "\033[?25h"
 
 namespace motor_control {
 
@@ -41,13 +62,13 @@ public:
     this->declare_parameter("publish_frequency", 100.0);
     
     // 初始化 CAN 网络
-    can_network_ = std::make_shared<CANNetwork>();
+    can_network_ = std::make_shared<hardware::CANNetwork>();
     
     // 设置 CAN 接收回调
-    can_network_->setCallback(
+    can_network_->setGlobalRxCallback(
       std::bind(&MotorControlNode::canRxCallback, this,
                 std::placeholders::_1, std::placeholders::_2,
-                std::placeholders::_3, std::placeholders::_4)
+                std::placeholders::_3)
     );
     
     // 初始化电机
@@ -55,7 +76,7 @@ public:
     initializeUnitreeMotors();
     
     // 启动 CAN 接收
-    can_network_->start();
+    can_network_->startAll();
     
     // 创建发布者
     createPublishers();
@@ -77,11 +98,12 @@ public:
       std::bind(&MotorControlNode::publishStates, this)
     );
     
-    RCLCPP_INFO(this->get_logger(), "电机控制节点已启动");
+    RCLCPP_INFO(this->get_logger(), "电机控制节点已启动 - 控制频率: %.1f Hz, 发布频率: %.1f Hz",
+                control_freq, publish_freq);
   }
   
   ~MotorControlNode() {
-    can_network_->stop();
+    can_network_->stopAll();
     can_network_->closeAll();
     
     for (auto& [name, port] : serial_ports_) {
@@ -92,7 +114,7 @@ public:
 private:
   void initializeMotors() {
     // 示例：添加一个 CAN 总线
-    can_network_->addBus(0, "/dev/ttyACM0", 921600);
+    can_network_->addInterface("can0", "/dev/ttyACM0", 921600);
     
     // 示例：添加一个 DJI GM6020 电机
     auto dji_motor = std::make_shared<DJIMotor>(
@@ -105,9 +127,9 @@ private:
   }
 
   // 辅助函数：获取或创建串口
-  std::shared_ptr<SerialPort> getSerialPort(const std::string& port_name) {
+  std::shared_ptr<hardware::SerialInterface> getSerialPort(const std::string& port_name) {
     if (serial_ports_.find(port_name) == serial_ports_.end()) {
-      auto port = std::make_shared<SerialPort>(port_name);
+      auto port = std::make_shared<hardware::SerialInterface>(port_name, 4000000);
       if (port->open()) {
         serial_ports_[port_name] = port;
         RCLCPP_INFO(this->get_logger(), "已打开串口: %s", port_name.c_str());
@@ -120,7 +142,10 @@ private:
   }
 
   void initializeUnitreeMotors() {
-    // 示例：添加一个宇树 A1 电机 (ID 0)
+    // 示例代码已注释，请根据实际配置添加电机
+    // 如需添加宇树电机，请取消注释并修改参数
+    
+    /*
     std::string port_name = "/dev/ttyUSB0";
     auto port = getSerialPort(port_name);
     
@@ -132,6 +157,7 @@ private:
       unitree_motors_.push_back(unitree_motor);
       RCLCPP_INFO(this->get_logger(), "已添加宇树 A1 电机: fl_hip_motor");
     }
+    */
   }
   
   void createPublishers() {
@@ -180,9 +206,14 @@ private:
     );
   }
   
-  void canRxCallback(uint8_t bus_id, uint32_t can_id, 
-                     const uint8_t* data, size_t len) {
-    (void)bus_id; // 消除警告
+  void canRxCallback(uint32_t can_id, const uint8_t* data, size_t len) {
+    // 调试日志：显示接收到的 CAN 帧
+    RCLCPP_DEBUG_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                         "[CAN RX] ID: 0x%03X, Len: %zu, Data: %02X %02X %02X %02X %02X %02X %02X %02X",
+                         can_id, len, 
+                         data[0], data[1], data[2], data[3], 
+                         data[4], data[5], data[6], data[7]);
+    
     // 将 CAN 帧分发给对应的电机
     for (auto& [name, motor] : motors_) {
       motor->updateFeedback(can_id, data, len);
@@ -236,7 +267,14 @@ private:
         data[offset + 1] = bytes[1];
       }
       
-      can_network_->send(motors[0]->getBusId(), control_id, data, 8);
+      // 调试日志：显示发送的 CAN 帧
+      RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                           "[CAN TX] ID: 0x%03X, Data: %02X %02X %02X %02X %02X %02X %02X %02X",
+                           control_id,
+                           data[0], data[1], data[2], data[3],
+                           data[4], data[5], data[6], data[7]);
+      
+      can_network_->send("can0", control_id, data, 8);
     }
   }
   
@@ -253,71 +291,106 @@ private:
           
           damiao->getControlFrame(can_id, data, len);
           if (len > 0) {
-            can_network_->send(0, can_id, data, len);
+            can_network_->send("can0", can_id, data, len);
           }
         }
       }
     }
   }
   
+  
   void publishStates() {
+    auto now = this->now();
+    int64_t current_time_ns = std::chrono::steady_clock::now().time_since_epoch().count();
+    double heartbeat_timeout_ms = 500.0;  // 500ms 超时
+    
+    // 检查所有电机的心跳超时
+    for (auto& motor : dji_motors_) {
+      motor->checkHeartbeat(heartbeat_timeout_ms, current_time_ns);
+    }
+    for (auto& [name, motor] : motors_) {
+      motor->checkHeartbeat(heartbeat_timeout_ms, current_time_ns);
+    }
+    for (auto& motor : unitree_motors_) {
+      motor->checkHeartbeat(heartbeat_timeout_ms, current_time_ns);
+    }
+    
     // 发布 DJI 电机状态
-    if (!dji_motors_.empty()) {
+    for (auto& motor : dji_motors_) {
       auto msg = motor_control_ros2::msg::DJIMotorState();
-      msg.header.stamp = this->now();
-      
-      for (auto& motor : dji_motors_) {
-        msg.joint_name = motor->getJointName();
-        msg.model = (motor->getMotorType() == MotorType::DJI_GM6020) ? "GM6020" : "GM3508";
-        msg.online = motor->isOnline();
-        msg.angle = motor->getOutputPosition() * 180.0 / M_PI;
-        msg.temperature = static_cast<uint8_t>(motor->getTemperature());
-        
-        dji_state_pub_->publish(msg);
-      }
+      msg.header.stamp = now;
+      msg.joint_name = motor->getJointName();
+      msg.model = (motor->getMotorType() == MotorType::DJI_GM6020) ? "GM6020" : "GM3508";
+      msg.online = motor->isOnline();
+      msg.angle = motor->getOutputPosition() * 180.0 / M_PI;
+      msg.temperature = static_cast<uint8_t>(motor->getTemperature());
+      dji_state_pub_->publish(msg);
     }
     
     // 发布达妙电机状态
-    // (逻辑与 DJI 类似，此处略，可根据 demand 添加)
-
-    // 发布宇树电机状态
-    if (!unitree_motors_.empty()) {
-      for (auto& motor : unitree_motors_) {
-        // A1
-        if (motor->getMotorType() == MotorType::UNITREE_A1) {
-          auto msg = motor_control_ros2::msg::UnitreeMotorState();
-          msg.header.stamp = this->now();
-          msg.joint_name = motor->getJointName();
-          msg.online = motor->isOnline();
-          msg.position = motor->getOutputPosition();
-          msg.velocity = motor->getOutputVelocity();
-          msg.torque = motor->getOutputTorque();
-          msg.temperature = static_cast<int8_t>(motor->getTemperature());
-          unitree_state_pub_->publish(msg);
-        } 
-        // GO-8010
-        else if (motor->getMotorType() == MotorType::UNITREE_GO8010) {
-          auto msg = motor_control_ros2::msg::UnitreeGO8010State();
-          msg.header.stamp = this->now();
-          msg.joint_name = motor->getJointName();
-          msg.online = motor->isOnline();
-          msg.position = motor->getOutputPosition();
-          msg.velocity = motor->getOutputVelocity();
-          msg.torque = motor->getOutputTorque();
-          msg.temperature = static_cast<int8_t>(motor->getTemperature());
-          unitree_go_state_pub_->publish(msg);
+    for (auto& [name, motor] : motors_) {
+      if (motor->getMotorType() == MotorType::DAMIAO_DM4340 ||
+          motor->getMotorType() == MotorType::DAMIAO_DM4310) {
+        auto damiao = std::dynamic_pointer_cast<DamiaoMotor>(motor);
+        if (damiao) {
+          auto msg = motor_control_ros2::msg::DamiaoMotorState();
+          msg.header.stamp = now;
+          msg.joint_name = damiao->getJointName();
+          msg.online = damiao->isOnline();
+          msg.position = damiao->getOutputPosition();
+          msg.velocity = damiao->getOutputVelocity();
+          msg.torque = damiao->getOutputTorque();
+          msg.temp_mos = static_cast<uint8_t>(damiao->getTemperature());
+          msg.temp_rotor = 0;  // 暂时设为0，需要从电机获取
+          msg.error_code = 0;
+          damiao_state_pub_->publish(msg);
         }
+      }
+    }
+    
+    // 发布宇树电机状态
+    for (auto& motor : unitree_motors_) {
+      if (motor->getMotorType() == MotorType::UNITREE_A1) {
+        auto msg = motor_control_ros2::msg::UnitreeMotorState();
+        msg.header.stamp = now;
+        msg.joint_name = motor->getJointName();
+        msg.online = motor->isOnline();
+        msg.position = motor->getOutputPosition();
+        msg.velocity = motor->getOutputVelocity();
+        msg.torque = motor->getOutputTorque();
+        msg.temperature = static_cast<int8_t>(motor->getTemperature());
+        unitree_state_pub_->publish(msg);
+      } else if (motor->getMotorType() == MotorType::UNITREE_GO8010) {
+        auto msg = motor_control_ros2::msg::UnitreeGO8010State();
+        msg.header.stamp = now;
+        msg.joint_name = motor->getJointName();
+        msg.online = motor->isOnline();
+        msg.position = motor->getOutputPosition();
+        msg.velocity = motor->getOutputVelocity();
+        msg.torque = motor->getOutputTorque();
+        msg.temperature = static_cast<int8_t>(motor->getTemperature());
+        unitree_go_state_pub_->publish(msg);
       }
     }
   }
   
   void djiCommandCallback(const motor_control_ros2::msg::DJIMotorCommand::SharedPtr msg) {
+    RCLCPP_INFO(this->get_logger(), 
+                "[CMD] 收到 DJI 命令: joint='%s', output=%d",
+                msg->joint_name.c_str(), msg->output);
+    
     auto it = motors_.find(msg->joint_name);
     if (it != motors_.end()) {
       auto dji = std::dynamic_pointer_cast<DJIMotor>(it->second);
       if (dji) {
         dji->setOutput(msg->output);
+        RCLCPP_INFO(this->get_logger(), 
+                    "[CMD] 已设置电机 '%s' 输出为 %d",
+                    msg->joint_name.c_str(), msg->output);
       }
+    } else {
+      RCLCPP_WARN(this->get_logger(), 
+                  "[CMD] 未找到电机: %s", msg->joint_name.c_str());
     }
   }
   
@@ -356,7 +429,7 @@ private:
   }
 
 private:
-  std::shared_ptr<CANNetwork> can_network_;
+  std::shared_ptr<hardware::CANNetwork> can_network_;
   std::map<std::string, std::shared_ptr<MotorBase>> motors_;
   std::vector<std::shared_ptr<DJIMotor>> dji_motors_;
   
@@ -373,7 +446,7 @@ private:
   rclcpp::Subscription<motor_control_ros2::msg::UnitreeMotorCommand>::SharedPtr unitree_cmd_sub_;
   rclcpp::Subscription<motor_control_ros2::msg::UnitreeGO8010Command>::SharedPtr unitree_go_cmd_sub_;
 
-  std::map<std::string, std::shared_ptr<SerialPort>> serial_ports_;
+  std::map<std::string, std::shared_ptr<hardware::SerialInterface>> serial_ports_;
   std::vector<std::shared_ptr<UnitreeMotor>> unitree_motors_;
 };
 

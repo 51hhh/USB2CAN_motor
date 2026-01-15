@@ -32,12 +32,22 @@ case $choice in
         ;;
     4)
         echo "正在监听所有电机状态话题..."
+        echo "提示：如果没有节点运行，请先执行: ros2 launch motor_control_ros2 motor_control.launch.py"
         echo "按 Ctrl+C 停止"
-        ros2 topic echo /dji_motor_states &
+        
+        # 检查节点是否运行
+        if ! ros2 node list | grep -q motor_control_node; then
+            echo "错误：motor_control_node 未运行！"
+            echo "请先在另一个终端执行: ros2 launch motor_control_ros2 motor_control.launch.py"
+            exit 1
+        fi
+        
+        # 使用 timeout 避免无限等待
+        timeout 30 ros2 topic echo /dji_motor_states &
         PID1=$!
-        ros2 topic echo /damiao_motor_states &
+        timeout 30 ros2 topic echo /damiao_motor_states &
         PID2=$!
-        ros2 topic echo /unitree_motor_states &
+        timeout 30 ros2 topic echo /unitree_motor_states &
         PID3=$!
         
         wait $PID1 $PID2 $PID3

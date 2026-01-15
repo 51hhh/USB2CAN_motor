@@ -95,6 +95,32 @@ public:
   bool isOnline() const { return online_; }
   
   /**
+   * @brief 检查心跳超时并更新在线状态
+   * @param timeout_ms 超时时间（毫秒）
+   * @param current_time_ns 当前时间（纳秒）
+   */
+  void checkHeartbeat(double timeout_ms, int64_t current_time_ns) {
+    if (last_feedback_time_ns_ == 0) {
+      // 从未收到反馈
+      online_ = false;
+      return;
+    }
+    
+    double dt_ms = (current_time_ns - last_feedback_time_ns_) / 1e6;
+    if (dt_ms > timeout_ms) {
+      online_ = false;
+    }
+  }
+  
+  /**
+   * @brief 更新最后反馈时间（在 updateFeedback 中调用）
+   */
+  void updateLastFeedbackTime(int64_t current_time_ns) {
+    last_feedback_time_ns_ = current_time_ns;
+    online_ = true;
+  }
+  
+  /**
    * @brief 获取输出轴位置（弧度）
    * 
    * 如果编码器在输出轴，直接返回；
@@ -189,6 +215,9 @@ protected:
   double target_position_;
   double target_velocity_;
   double target_torque_;
+  
+  // 心跳检测
+  int64_t last_feedback_time_ns_ = 0;  // 最后一次收到反馈的时间（纳秒）
 };
 
 } // namespace motor_control

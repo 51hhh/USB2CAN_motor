@@ -16,27 +16,31 @@ serial_ports:
 # 电机配置
 motors:
   # ==================== DJI 电机 ====================
-  # DJI GM6020 示例 - 编码器在输出轴，直驱
+  # DJI GM6020 示例 - 电压控制
+  # Logic ID 1 -> Feedback 0x205, Control 0x1FF
+  # Logic ID 1-4 use Control 0x1FF; ID 5-7 use Control 0x2FF
   yaw_motor:
     type: GM6020
     can_bus: can0
-    motor_id: 1
+    motor_id: 1               # 逻辑 ID 1 (对应反馈帧 0x205)
     joint_name: yaw_joint
     # 编码器配置
-    encoder_on_output: true   # 编码器在输出轴
-    gear_ratio: 1.0           # 直驱，无减速
-    encoder_resolution: 8192  # 8192 线/圈
+    encoder_on_output: true   # GM6020 为直驱，编码器直读输出轴
+    gear_ratio: 1.0           
+    encoder_resolution: 8192
   
-  # DJI GM3508 示例 - 编码器在输出轴
+  # DJI GM3508 示例 - 电流控制
+  # Logic ID 1 -> Feedback 0x201, Control 0x200
+  # Logic ID 1-4 use Control 0x200; ID 5-8 use Control 0x1FF
   wheel_motor:
     type: GM3508
     can_bus: can0
-    motor_id: 2
+    motor_id: 1               # 逻辑 ID 1 (对应反馈帧 0x201)
     joint_name: wheel_joint
     # 编码器配置
-    encoder_on_output: true   # 编码器在输出轴（减速箱之后）
-    gear_ratio: 19.0          # 减速比 19:1
-    encoder_resolution: 8192  # 8192 线/圈
+    encoder_on_output: true
+    gear_ratio: 19.0          # 3508自带减速箱通常为19:1
+    encoder_resolution: 8192
   
   # ==================== 达妙电机 ====================
   # 达妙 DM4340 示例 - 双编码器，输出轴绝对位置

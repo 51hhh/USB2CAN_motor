@@ -1,5 +1,7 @@
 #include "motor_control_ros2/dji_motor.hpp"
 #include <cstring>
+#include <iostream>
+#include <chrono>
 
 namespace motor_control {
 
@@ -34,31 +36,30 @@ void DJIMotor::updateFeedback(uint32_t can_id, const uint8_t* data, size_t len) 
     return;
   }
   
-  online_ = true;
+  // 更新心跳时间（会自动设置 online_ = true）
+  updateLastFeedbackTime(std::chrono::steady_clock::now().time_since_epoch().count());
   
   // 解析 DJI 反馈帧 (Big Endian)
-  // Byte 0-1: Angle (0-8191)
-  // Byte 2-3: RPM
-  // Byte 4-5: Current
-  // Byte 6: Temperature
   raw_angle_ = (static_cast<uint16_t>(data[0]) << 8) | data[1];
   raw_rpm_ = (static_cast<int16_t>(data[2]) << 8) | data[3];
   raw_current_ = (static_cast<int16_t>(data[4]) << 8) | data[5];
   raw_temp_ = data[6];
   
   // 转换为标准单位
-  // 位置：0-8191 -> 0-2π 弧度
   position_ = (raw_angle_ / 8191.0) * 2.0 * M_PI;
-  
-  // 速度：RPM -> 弧度/秒
   velocity_ = (raw_rpm_ / 60.0) * 2.0 * M_PI;
-  
-  // 力矩：原始电流值（需要根据实际电机转矩常数转换）
-  // 这里暂时直接使用电流值
   torque_ = raw_current_;
-  
-  // 温度
   temperature_ = static_cast<float>(raw_temp_);
+  
+  // 调试日志（仅在首次上线或定期输出）
+  static int feedback_count = 0;
+  if (feedback_count++ % 500 == 0) {  // 每500次输出一次（约1秒@500Hz）
+    std::cout << "[DJI " << joint_name_ << "] Online! "
+              << "Angle=" << raw_angle_ 
+              << " RPM=" << raw_rpm_ 
+              << " Current=" << raw_current_ 
+              << " Temp=" << static_cast<int>(raw_temp_) << "°C" << std::endl;
+  }
 }
 
 void DJIMotor::getControlFrame(uint32_t& can_id, uint8_t* data, size_t& len) {

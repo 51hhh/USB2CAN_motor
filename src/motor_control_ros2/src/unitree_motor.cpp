@@ -6,7 +6,7 @@
 namespace motor_control {
 
 UnitreeMotor::UnitreeMotor(const std::string& joint_name, MotorType type,
-                           std::shared_ptr<SerialPort> serial_port,
+                           std::shared_ptr<hardware::SerialInterface> serial_port,
                            uint8_t motor_id, int direction, float offset)
   : MotorBase(joint_name, type, 
               (type == MotorType::UNITREE_A1) ? 9.1f : 6.33f, // 减速比 (用于记录, 实际计算内部处理)
@@ -93,7 +93,7 @@ bool UnitreeMotor::sendCommand() {
   cmd_frame_.crc = crc32_core((uint32_t*)&cmd_frame_, 30 / 4);
   
   // 发送 (34 bytes)
-  int n = serial_port_->send((uint8_t*)&cmd_frame_, sizeof(cmd_frame_));
+  ssize_t n = serial_port_->send((uint8_t*)&cmd_frame_, sizeof(cmd_frame_));
   return (n == sizeof(cmd_frame_));
 }
 
@@ -103,7 +103,7 @@ bool UnitreeMotor::receiveFeedback() {
   // 读取响应 (78 bytes)
   // 注意：这里简化处理，假设每次都能读到完整帧
   // 实际应用可能需要环形缓冲区处理拆包粘包
-  int n = serial_port_->receive((uint8_t*)&res_frame_, sizeof(res_frame_));
+  ssize_t n = serial_port_->receive((uint8_t*)&res_frame_, sizeof(res_frame_));
   
   if (n != sizeof(res_frame_)) return false;
   

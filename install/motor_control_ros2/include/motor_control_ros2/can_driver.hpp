@@ -87,7 +87,8 @@ private:
   
   // 发送/接收缓冲区
   uint8_t tx_buffer_[30];
-  uint8_t rx_buffer_[16];
+  uint8_t rx_buffer_[256];  // 增大接收缓冲区
+  std::vector<uint8_t> rx_accumulator_;  // 累积缓冲区
 };
 
 /**

@@ -2,7 +2,7 @@
 #define MOTOR_CONTROL_ROS2__UNITREE_MOTOR_HPP_
 
 #include "motor_control_ros2/motor_base.hpp"
-#include "motor_control_ros2/serial_port.hpp"
+#include "motor_control_ros2/hardware/serial_interface.hpp"
 #include <memory>
 #include <vector>
 
@@ -69,7 +69,7 @@ public:
    * @param offset 零点偏移
    */
   UnitreeMotor(const std::string& joint_name, MotorType type,
-               std::shared_ptr<SerialPort> serial_port,
+               std::shared_ptr<hardware::SerialInterface> serial_port,
                uint8_t motor_id, int direction = 1, float offset = 0.0f);
                
   // 实现基类纯虚函数
@@ -105,7 +105,7 @@ public:
   const UnitreeMotorCommandFrame& getCommandFrame() const { return cmd_frame_; }
 
 private:
-  std::shared_ptr<SerialPort> serial_port_;
+  std::shared_ptr<hardware::SerialInterface> serial_port_;
   uint8_t motor_id_;
   int direction_;
   float offset_;

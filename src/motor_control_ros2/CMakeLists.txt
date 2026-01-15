@@ -8,13 +8,12 @@ endif()
 
 # 查找依赖
 find_package(ament_cmake REQUIRED)
-find_package(ament_cmake_python REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(rclpy REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 # 消息和服务生成
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -38,8 +37,11 @@ include_directories(include)
 
 # C++ 库 - 核心逻辑
 add_library(motor_control_lib
-  src/can_driver.cpp
-  src/serial_port.cpp
+  # 硬件层
+  src/hardware/can_interface.cpp
+  src/hardware/serial_interface.cpp
+  src/hardware/hardware_manager.cpp
+  # 电机驱动层
   src/dji_motor.cpp
   src/damiao_motor.cpp
   src/unitree_motor.cpp
@@ -55,7 +57,7 @@ ament_target_dependencies(motor_control_lib
 # 导出库接口
 rosidl_get_typesupport_target(cpp_typesupport_target
   ${PROJECT_NAME} "rosidl_typesupport_cpp")
-target_link_libraries(motor_control_lib "${cpp_typesupport_target}")
+target_link_libraries(motor_control_lib "${cpp_typesupport_target}" yaml-cpp)
 
 # C++ 可执行文件 - 实时控制节点
 add_executable(motor_control_node
@@ -73,10 +75,27 @@ ament_target_dependencies(motor_control_node
   sensor_msgs
 )
 
+# C++ 可执行文件 - 电机监控节点
+add_executable(motor_monitor_node
+  src/motor_monitor_node.cpp
+)
+
+# 链接消息类型支持
+target_link_libraries(motor_monitor_node
+  "${cpp_typesupport_target}"
+)
+
+ament_target_dependencies(motor_monitor_node
+  rclcpp
+  std_msgs
+  sensor_msgs
+)
+
 # 安装目标
 install(TARGETS
   motor_control_lib
   motor_control_node
+  motor_monitor_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}
@@ -85,15 +104,6 @@ install(TARGETS
 # 安装头文件
 install(DIRECTORY include/
   DESTINATION include
-)
-
-# 安装 Python 模块
-# ament_python_install_package(${PROJECT_NAME})
-
-# 安装 Python 脚本
-install(PROGRAMS
-  motor_control_ros2/lifecycle_node.py
-  DESTINATION lib/${PROJECT_NAME}
 )
 
 # 安装配置文件和启动文件
