@@ -1,4 +1,5 @@
 #include <rclcpp/rclcpp.hpp>
+#include <ament_index_cpp/get_package_share_directory.hpp>
 #include <memory>
 #include <vector>
 #include <map>
@@ -11,6 +12,7 @@
 #include "motor_control_ros2/unitree_motor.hpp"
 #include "motor_control_ros2/hardware/can_interface.hpp"
 #include "motor_control_ros2/hardware/serial_interface.hpp"
+#include "motor_control_ros2/config_parser.hpp"
 
 #include "motor_control_ros2/msg/dji_motor_state.hpp"
 #include "motor_control_ros2/msg/dji_motor_command.hpp"
@@ -60,6 +62,14 @@ public:
     // 声明参数
     this->declare_parameter("control_frequency", 500.0);
     this->declare_parameter("publish_frequency", 100.0);
+    this->declare_parameter("config_file", "");
+    
+    // 获取配置文件路径
+    std::string config_file = this->get_parameter("config_file").as_string();
+    if (config_file.empty()) {
+      // 使用默认路径
+      config_file = ament_index_cpp::get_package_share_directory("motor_control_ros2") + "/config/motors.yaml";
+    }
     
     // 初始化 CAN 网络
     can_network_ = std::make_shared<hardware::CANNetwork>();
@@ -71,9 +81,14 @@ public:
                 std::placeholders::_3)
     );
     
-    // 初始化电机
-    initializeMotors();
-    initializeUnitreeMotors();
+    // 从配置文件初始化电机
+    try {
+      initializeFromConfig(config_file);
+    } catch (const std::exception& e) {
+      RCLCPP_ERROR(this->get_logger(), "配置加载失败: %s", e.what());
+      RCLCPP_WARN(this->get_logger(), "使用默认配置（仅示例电机）");
+      initializeMotors();  // 回退到硬编码配置
+    }
     
     // 启动 CAN 接收
     can_network_->startAll();
@@ -158,6 +173,116 @@ private:
       RCLCPP_INFO(this->get_logger(), "已添加宇树 A1 电机: fl_hip_motor");
     }
     */
+  }
+  
+  /**
+   * @brief 从配置文件初始化电机
+   */
+  void initializeFromConfig(const std::string& config_file) {
+    RCLCPP_INFO(this->get_logger(), "正在加载配置文件: %s", config_file.c_str());
+    
+    // 加载配置
+    SystemConfig config = ConfigParser::loadConfig(config_file);
+    
+    // 初始化 CAN 接口和电机
+    for (const auto& can_config : config.can_interfaces) {
+      // 添加 CAN 接口
+      std::string interface_name = "can_" + std::to_string(can_interfaces_count_++);
+      can_network_->addInterface(interface_name, can_config.device, can_config.baudrate);
+      
+      // 添加电机
+      for (const auto& motor_config : can_config.motors) {
+        addMotorFromConfig(motor_config, interface_name);
+      }
+    }
+    
+    // 初始化串口接口和电机
+    for (const auto& serial_config : config.serial_interfaces) {
+      // 创建串口
+      auto port = std::make_shared<hardware::SerialInterface>(
+        serial_config.device, serial_config.baudrate
+      );
+      
+      if (port->open()) {
+        serial_ports_[serial_config.device] = port;
+        RCLCPP_INFO(this->get_logger(), "已打开串口: %s @ %d bps", 
+                    serial_config.device.c_str(), serial_config.baudrate);
+        
+        // 添加电机
+        for (const auto& motor_config : serial_config.motors) {
+          addUnitreeMotorFromConfig(motor_config, port);
+        }
+      } else {
+        RCLCPP_ERROR(this->get_logger(), "无法打开串口: %s", serial_config.device.c_str());
+      }
+    }
+    
+    RCLCPP_INFO(this->get_logger(), "配置加载完成 - DJI 电机: %zu, 宇树电机: %zu", 
+                dji_motors_.size(), unitree_motors_.size());
+  }
+  
+  /**
+   * @brief 从配置添加 CAN 电机
+   */
+  void addMotorFromConfig(const MotorConfig& config, const std::string& interface_name) {
+    (void)interface_name;  // 暂时未使用，保留以便将来扩展
+    MotorType motor_type;
+    
+    // 解析电机类型
+    if (config.type == "GM6020") {
+      motor_type = MotorType::DJI_GM6020;
+    } else if (config.type == "GM3508") {
+      motor_type = MotorType::DJI_GM3508;
+    } else if (config.type == "DM4340") {
+      motor_type = MotorType::DAMIAO_DM4340;
+    } else if (config.type == "DM4310") {
+      motor_type = MotorType::DAMIAO_DM4310;
+    } else {
+      RCLCPP_ERROR(this->get_logger(), "未知的电机类型: %s", config.type.c_str());
+      return;
+    }
+    
+    // 创建电机
+    if (motor_type == MotorType::DJI_GM6020 || motor_type == MotorType::DJI_GM3508) {
+      auto motor = std::make_shared<DJIMotor>(config.name, motor_type, config.id, 0);
+      motors_[config.name] = motor;
+      dji_motors_.push_back(motor);
+      RCLCPP_INFO(this->get_logger(), "添加 DJI 电机: %s (%s, ID=%d)", 
+                  config.name.c_str(), config.type.c_str(), config.id);
+    } else if (motor_type == MotorType::DAMIAO_DM4340 || motor_type == MotorType::DAMIAO_DM4310) {
+      auto motor = std::make_shared<DamiaoMotor>(config.name, motor_type, config.id, 0);
+      motors_[config.name] = motor;
+      RCLCPP_INFO(this->get_logger(), "添加达妙电机: %s (%s, ID=%d)", 
+                  config.name.c_str(), config.type.c_str(), config.id);
+    }
+  }
+  
+  /**
+   * @brief 从配置添加宇树电机
+   */
+  void addUnitreeMotorFromConfig(const MotorConfig& config, 
+                                   std::shared_ptr<hardware::SerialInterface> port) {
+    MotorType motor_type;
+    
+    // 解析电机类型
+    if (config.type == "A1") {
+      motor_type = MotorType::UNITREE_A1;
+    } else if (config.type == "GO8010") {
+      motor_type = MotorType::UNITREE_GO8010;
+    } else {
+      RCLCPP_ERROR(this->get_logger(), "未知的宇树电机类型: %s", config.type.c_str());
+      return;
+    }
+    
+    // 创建电机
+    auto motor = std::make_shared<UnitreeMotor>(
+      config.name, motor_type, port, config.id, config.direction, config.offset
+    );
+    motors_[config.name] = motor;
+    unitree_motors_.push_back(motor);
+    
+    RCLCPP_INFO(this->get_logger(), "添加宇树电机: %s (%s, ID=%d)", 
+                config.name.c_str(), config.type.c_str(), config.id);
   }
   
   void createPublishers() {
@@ -448,6 +573,9 @@ private:
 
   std::map<std::string, std::shared_ptr<hardware::SerialInterface>> serial_ports_;
   std::vector<std::shared_ptr<UnitreeMotor>> unitree_motors_;
+  
+  // 配置相关
+  int can_interfaces_count_ = 0;
 };
 
 } // namespace motor_control

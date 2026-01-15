@@ -14,6 +14,7 @@
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>yaml-cpp</depend>
+  <depend>ament_index_cpp</depend>
   
   <!-- 消息生成 -->
   <build_depend>rosidl_default_generators</build_depend>

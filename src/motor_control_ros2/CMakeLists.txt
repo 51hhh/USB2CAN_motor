@@ -14,6 +14,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 
 # 消息和服务生成
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -45,6 +46,8 @@ add_library(motor_control_lib
   src/dji_motor.cpp
   src/damiao_motor.cpp
   src/unitree_motor.cpp
+  # 配置解析
+  src/config_parser.cpp
 )
 
 # 为库添加依赖
@@ -73,6 +76,7 @@ ament_target_dependencies(motor_control_node
   rclcpp
   std_msgs
   sensor_msgs
+  ament_index_cpp
 )
 
 # C++ 可执行文件 - 电机监控节点
