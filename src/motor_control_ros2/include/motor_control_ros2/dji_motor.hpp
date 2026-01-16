@@ -4,6 +4,7 @@
 #include "motor_control_ros2/motor_base.hpp"
 #include "motor_control_ros2/cascade_controller.hpp"
 #include <cstdint>
+#include <cmath>
 
 namespace motor_control {
 
@@ -11,7 +12,8 @@ namespace motor_control {
  * @brief DJI 电机驱动类
  * 
  * 支持 GM3508 和 GM6020 电机。
- * 编码器在输出轴，8192 线/圈。
+ * - GM6020: 编码器在输出轴，8192 线/圈，减速比 1:1
+ * - GM3508: 编码器在电机轴（减速前），8192 线/圈，减速比 19:1
  */
 class DJIMotor : public MotorBase {
 public:
@@ -118,10 +120,23 @@ public:
   
   /**
    * @brief 获取角度（度，0-360）
-   * 与 Python 实现一致的单位
+   * 
+   * 统一接口：GM6020 和 GM3508 都返回输出轴角度（0-360°）
+   * - GM6020: 编码器直接读取输出轴角度
+   * - GM3508: 累积编码器 / 减速比，归一化到 0-360°
    */
   double getAngleDegrees() const {
-    return (raw_angle_ / 8191.0) * 360.0;
+    // 获取输出轴位置（弧度）
+    double output_rad = getOutputPosition();
+    
+    // 转换为度
+    double degrees = output_rad * 180.0 / M_PI;
+    
+    // 归一化到 [0, 360) 范围
+    degrees = fmod(degrees, 360.0);
+    if (degrees < 0) degrees += 360.0;
+    
+    return degrees;
   }
   
   /**
@@ -141,10 +156,15 @@ private:
   int16_t max_output_;         // 最大输出限幅
   
   // 原始反馈数据
-  uint16_t raw_angle_;         // 0-8191
+  uint16_t raw_angle_;         // 0-8191（单圈编码器值）
   int16_t raw_rpm_;
   int16_t raw_current_;
   uint8_t raw_temp_;
+  
+  // 累积编码器（用于 GM3508，编码器在电机轴）
+  uint16_t last_raw_angle_;    // 上一次的编码器值
+  int32_t encoder_rounds_;     // 累积圈数（电机轴）
+  bool first_feedback_;        // 是否是第一次反馈
   
   // 串级控制
   CascadeController cascade_controller_;  // 串级控制器

@@ -10,7 +10,7 @@ DJIMotor::DJIMotor(const std::string& joint_name, MotorType type,
                    uint8_t motor_id, uint8_t bus_id)
   : MotorBase(joint_name, type, 
               (type == MotorType::DJI_GM3508) ? 19.0f : 1.0f,  // 减速比
-              true)  // 编码器在输出轴
+              (type == MotorType::DJI_GM6020))  // GM6020 编码器在输出轴，GM3508 编码器在电机轴
   , motor_id_(motor_id)
   , bus_id_(bus_id)
   , target_output_(0)
@@ -18,6 +18,9 @@ DJIMotor::DJIMotor(const std::string& joint_name, MotorType type,
   , raw_rpm_(0)
   , raw_current_(0)
   , raw_temp_(0)
+  , last_raw_angle_(0)
+  , encoder_rounds_(0)
+  , first_feedback_(true)
   , position_target_(0.0)
   , velocity_target_(0.0)
 {
@@ -51,8 +54,37 @@ void DJIMotor::updateFeedback(uint32_t can_id, const uint8_t* data, size_t len) 
   raw_current_ = (static_cast<int16_t>(data[4]) << 8) | data[5];
   raw_temp_ = data[6];
   
-  // 转换为标准单位
-  position_ = (raw_angle_ / 8191.0) * 2.0 * M_PI;
+  // 累积编码器逻辑（用于 GM3508，编码器在电机轴）
+  if (!encoder_on_output_) {
+    // GM3508: 编码器在电机轴，需要累积圈数
+    if (!first_feedback_) {
+      // 检测过零
+      int32_t delta = static_cast<int32_t>(raw_angle_) - static_cast<int32_t>(last_raw_angle_);
+      
+      // 过零检测：如果变化超过半圈（4096），说明发生了过零
+      if (delta > 4096) {
+        // 从 8191 跳到 0（逆时针过零）
+        encoder_rounds_--;
+      } else if (delta < -4096) {
+        // 从 0 跳到 8191（顺时针过零）
+        encoder_rounds_++;
+      }
+    }
+    
+    last_raw_angle_ = raw_angle_;
+    first_feedback_ = false;
+    
+    // 计算累积位置（电机轴）= 累积圈数 × 2π + 当前圈内位置
+    double rounds_position = encoder_rounds_ * 2.0 * M_PI;
+    double current_round_position = (raw_angle_ / 8191.0) * 2.0 * M_PI;
+    position_ = rounds_position + current_round_position;
+    
+  } else {
+    // GM6020: 编码器在输出轴，直接转换
+    position_ = (raw_angle_ / 8191.0) * 2.0 * M_PI;
+  }
+  
+  // 速度转换（两种电机都一样，RPM 是电机轴速度）
   velocity_ = (raw_rpm_ / 60.0) * 2.0 * M_PI;
   torque_ = raw_current_;
   temperature_ = static_cast<float>(raw_temp_);
@@ -62,8 +94,14 @@ void DJIMotor::updateFeedback(uint32_t can_id, const uint8_t* data, size_t len) 
   if (feedback_count++ % 100 == 0) {  // 每100次输出一次
     std::cout << "[DJI " << joint_name_ << "] "
               << "Angle=" << std::fixed << std::setprecision(1) << getAngleDegrees() << "° "
-              << "RPM=" << raw_rpm_ 
-              << " Temp=" << static_cast<int>(raw_temp_) << "°C" << std::endl;
+              << "RPM=" << raw_rpm_;
+    
+    if (!encoder_on_output_) {
+      // GM3508: 显示累积圈数
+      std::cout << " Rounds=" << encoder_rounds_;
+    }
+    
+    std::cout << " Temp=" << static_cast<int>(raw_temp_) << "°C" << std::endl;
   }
 }
 

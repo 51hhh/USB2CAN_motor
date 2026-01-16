@@ -24,10 +24,13 @@ can_interfaces:
         type: GM6020
         id: 4
       
-      # DJI GM3508 电机示例
-      # - name: wheel_motor
-      #   type: GM3508
-      #   id: 1
+      - name: DJI3508_1
+        type: GM3508
+        id: 1
+
+      - name: DJI3508_2
+        type: GM3508
+        id: 2
   
   # CAN 接口 2 (如果有多个 USB-CAN 适配器)
   # - device: /dev/ttyACM1
