@@ -305,20 +305,20 @@ private:
   void createPublishers() {
     // DJI 电机状态发布者
     dji_state_pub_ = this->create_publisher<motor_control_ros2::msg::DJIMotorState>(
-      "dji_motor_states", 10
+      "dji_motor_states", 50  // ✅ 增加队列深度防止消息丢失
     );
     
     // 达妙电机状态发布者
     damiao_state_pub_ = this->create_publisher<motor_control_ros2::msg::DamiaoMotorState>(
-      "damiao_motor_states", 10
+      "damiao_motor_states", 50
     );
 
     // 宇树电机状态发布者
     unitree_state_pub_ = this->create_publisher<motor_control_ros2::msg::UnitreeMotorState>(
-      "unitree_motor_states", 10
+      "unitree_motor_states", 50
     );
     unitree_go_state_pub_ = this->create_publisher<motor_control_ros2::msg::UnitreeGO8010State>(
-      "unitree_go8010_states", 10
+      "unitree_go8010_states", 50
     );
     
     // 控制频率发布者
@@ -442,10 +442,15 @@ private:
       interface_groups[interface_name][control_id].push_back(motor);
     }
     
-    // 对每个接口的每个控制ID发送
+    // ✅ 对每个接口的每个控制ID使用 SendRecv 同步发送
     for (auto& [interface_name, control_id_groups] : interface_groups) {
+      auto interface = can_network_->getInterface(interface_name);
+      if (!interface) continue;
+      
       for (auto& [control_id, motors] : control_id_groups) {
+        // 1. 准备发送数据
         uint8_t data[8] = {0};
+        std::vector<uint32_t> expected_ids;
         
         for (auto& motor : motors) {
           uint8_t motor_id = motor->getMotorId();
@@ -455,16 +460,38 @@ private:
           int offset = ((motor_id - 1) % 4) * 2;
           data[offset] = bytes[0];
           data[offset + 1] = bytes[1];
+          
+          // ✅ 记录期望的反馈 ID
+          expected_ids.push_back(motor->getFeedbackId());
         }
         
-        // 调试日志：显示发送的 CAN 帧
-        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-                             "[CAN TX] %s ID: 0x%03X, Data: %02X %02X %02X %02X %02X %02X %02X %02X",
+        // 2. ✅ SendRecv 批量发送并接收
+        std::vector<hardware::CANFrame> rx_frames;
+        size_t received = interface->sendRecvBatch(
+            control_id, data, 8, expected_ids, rx_frames, 10  // 10ms 超时
+        );
+        
+        // 3. ✅ 更新电机状态
+        for (const auto& frame : rx_frames) {
+          for (auto& motor : motors) {
+            motor->updateFeedback(frame.can_id, frame.data, frame.len);
+          }
+        }
+        
+        // 4. ✅ 检测丢失的反馈
+        if (received < expected_ids.size()) {
+          RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+              "[CAN SendRecv] %s 控制ID 0x%03X: 期望 %zu 个反馈，实际收到 %zu 个",
+              interface_name.c_str(), control_id, expected_ids.size(), received);
+        }
+        
+        // 调试日志
+        RCLCPP_DEBUG_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                             "[CAN TX] %s ID: 0x%03X, Data: %02X %02X %02X %02X %02X %02X %02X %02X, RX: %zu/%zu",
                              interface_name.c_str(), control_id,
                              data[0], data[1], data[2], data[3],
-                             data[4], data[5], data[6], data[7]);
-        
-        can_network_->send(interface_name, control_id, data, 8);
+                             data[4], data[5], data[6], data[7],
+                             received, expected_ids.size());
       }
     }
   }

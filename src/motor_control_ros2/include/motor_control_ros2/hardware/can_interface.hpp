@@ -102,6 +102,41 @@ public:
   bool receive(CANFrame& frame);
   
   /**
+   * @brief 同步发送并接收（SendRecv 模式）
+   * 
+   * 发送命令后立即等待反馈，确保命令-反馈对应关系。
+   * 适用于需要实时反馈的场景（如 DJI 电机控制）。
+   * 
+   * @param can_id 发送的 CAN ID
+   * @param tx_data 发送数据
+   * @param tx_len 发送长度
+   * @param rx_frame 接收帧（输出）
+   * @param timeout_ms 超时时间（毫秒）
+   * @return 成功返回 true
+   */
+  bool sendRecv(uint32_t can_id, const uint8_t* tx_data, size_t tx_len,
+                CANFrame& rx_frame, int timeout_ms = 5);
+  
+  /**
+   * @brief 批量 SendRecv（用于 DJI 拼包）
+   * 
+   * 发送一帧命令，收集多个电机的反馈。
+   * 适用于 DJI 电机拼包发送场景（4 个电机共用一个控制 ID）。
+   * 
+   * @param can_id 发送的 CAN ID
+   * @param tx_data 发送数据
+   * @param tx_len 发送长度
+   * @param expected_ids 期望接收的 CAN ID 列表
+   * @param rx_frames 接收帧列表（输出）
+   * @param timeout_ms 超时时间
+   * @return 成功接收的帧数
+   */
+  size_t sendRecvBatch(uint32_t can_id, const uint8_t* tx_data, size_t tx_len,
+                       const std::vector<uint32_t>& expected_ids,
+                       std::vector<CANFrame>& rx_frames,
+                       int timeout_ms = 10);
+  
+  /**
    * @brief 设置接收回调
    * @param callback 回调函数
    */
@@ -126,6 +161,7 @@ public:
     uint64_t tx_errors;      // 发送错误
     uint64_t rx_errors;      // 接收错误
     uint64_t frame_errors;   // 帧格式错误
+    uint64_t sendrecv_timeouts;  // SendRecv 超时次数
   };
   
   Statistics getStatistics() const { return stats_; }
@@ -152,6 +188,9 @@ private:
   // 统计信息
   Statistics stats_;
   mutable std::mutex stats_mutex_;
+  
+  // SendRecv 同步锁
+  std::mutex sendrecv_mutex_;
   
   // 内部方法
   void receiveLoop();
