@@ -442,7 +442,7 @@ private:
       interface_groups[interface_name][control_id].push_back(motor);
     }
     
-    // 对每个接口的每个控制ID发送
+    // 对每个接口的每个控制ID发送（使用 SendRecv 同步模式）
     for (auto& [interface_name, control_id_groups] : interface_groups) {
       for (auto& [control_id, motors] : control_id_groups) {
         uint8_t data[8] = {0};
@@ -458,13 +458,29 @@ private:
         }
         
         // 调试日志：显示发送的 CAN 帧
-        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+        RCLCPP_DEBUG_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
                              "[CAN TX] %s ID: 0x%03X, Data: %02X %02X %02X %02X %02X %02X %02X %02X",
                              interface_name.c_str(), control_id,
                              data[0], data[1], data[2], data[3],
                              data[4], data[5], data[6], data[7]);
         
-        can_network_->send(interface_name, control_id, data, 8);
+        // ========== SendRecv 同步模式 ==========
+        // 发送命令后立即等待反馈（50us + 900us 超时）
+        // 这样可以避免数据堆积，确保 PID 及时响应
+        hardware::CANFrame response;
+        if (can_network_->sendRecv(interface_name, control_id, data, 8, response, 900)) {
+          // 收到反馈，立即更新电机状态
+          // 注意：DJI 电机的反馈 ID 与控制 ID 不同
+          // 反馈会通过 canRxCallback 自动分发到对应电机
+          RCLCPP_DEBUG_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+                               "[CAN RX] %s 收到反馈 ID: 0x%03X", 
+                               interface_name.c_str(), response.can_id);
+        } else {
+          // 超时，记录警告
+          RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+                              "[CAN TIMEOUT] %s ID: 0x%03X 未收到反馈", 
+                              interface_name.c_str(), control_id);
+        }
       }
     }
   }
