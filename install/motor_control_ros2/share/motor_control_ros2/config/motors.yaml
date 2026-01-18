@@ -27,7 +27,7 @@ can_interfaces:
         id: 4
       
   
-  - device: /dev/ttyACM0
+  - device: /dev/ttyACM1
     baudrate: 921600
     motors:
       - name: DJI3508_1          # 左前驱动电机

@@ -445,17 +445,49 @@ private:
     // ✅ 对每个接口的每个控制ID使用 SendRecv 同步发送
     for (auto& [interface_name, control_id_groups] : interface_groups) {
       auto interface = can_network_->getInterface(interface_name);
-      if (!interface) continue;
+      
+      // ✅ 健壮性检查：接口是否有效
+      if (!interface) {
+        RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+            "[CAN] 接口 %s 无效，跳过", interface_name.c_str());
+        continue;
+      }
+      
+      // ✅ 健壮性检查：接口是否已打开
+      if (!interface->isOpen()) {
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+            "[CAN] 接口 %s 未打开，跳过", interface_name.c_str());
+        continue;
+      }
       
       for (auto& [control_id, motors] : control_id_groups) {
+        // ✅ 健壮性检查：电机列表是否为空
+        if (motors.empty()) {
+          continue;
+        }
+        
         // 1. 准备发送数据
         uint8_t data[8] = {0};
         std::vector<uint32_t> expected_ids;
         
         for (auto& motor : motors) {
+          // ✅ 健壮性检查：电机指针是否有效
+          if (!motor) {
+            RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+                "[CAN] 检测到空电机指针，跳过");
+            continue;
+          }
+          
           uint8_t motor_id = motor->getMotorId();
           uint8_t bytes[2];
           motor->getControlBytes(bytes);
+          
+          // ✅ 健壮性检查：motor_id 范围 (1-8)
+          if (motor_id < 1 || motor_id > 8) {
+            RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+                "[CAN] 电机 ID %d 超出范围 (1-8)，跳过", motor_id);
+            continue;
+          }
           
           int offset = ((motor_id - 1) % 4) * 2;
           data[offset] = bytes[0];
@@ -465,16 +497,33 @@ private:
           expected_ids.push_back(motor->getFeedbackId());
         }
         
+        // ✅ 健壮性检查：是否有有效的期望反馈
+        if (expected_ids.empty()) {
+          RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+              "[CAN] 控制ID 0x%03X 没有有效的电机，跳过", control_id);
+          continue;
+        }
+        
         // 2. ✅ SendRecv 批量发送并接收
         std::vector<hardware::CANFrame> rx_frames;
-        size_t received = interface->sendRecvBatch(
-            control_id, data, 8, expected_ids, rx_frames, 10  // 10ms 超时
-        );
+        size_t received = 0;
+        
+        try {
+          received = interface->sendRecvBatch(
+              control_id, data, 8, expected_ids, rx_frames, 10  // 10ms 超时
+          );
+        } catch (const std::exception& e) {
+          RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+              "[CAN] SendRecv 异常: %s", e.what());
+          continue;
+        }
         
         // 3. ✅ 更新电机状态
         for (const auto& frame : rx_frames) {
           for (auto& motor : motors) {
-            motor->updateFeedback(frame.can_id, frame.data, frame.len);
+            if (motor) {  // ✅ 再次检查指针有效性
+              motor->updateFeedback(frame.can_id, frame.data, frame.len);
+            }
           }
         }
         
