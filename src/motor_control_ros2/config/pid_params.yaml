@@ -8,21 +8,21 @@ dji_motors:
   GM6020:
     # 角度环 (外环) - 单位: 度
     position_pid:
-      kp: 10.0           # 与 Python angle_pid 一致
+      kp: 20.0           # 与 Python angle_pid 一致
       ki: 1.0            # 与 Python angle_pid 一致
       kd: 0.0            # 与 Python angle_pid 一致
       i_max: 50.0        # 积分限幅 (RPM)
-      out_max: 200.0     # 输出限幅 (目标 RPM)
-      dead_zone: 2       # 位置死区
+      out_max: 700.0     # 输出限幅 (目标 RPM)
+      dead_zone: 0.1       # 位置死区
     
     # 速度环 (内环) - 单位: RPM
     velocity_pid:
       kp: 40.0           # 与 Python speed_pid 一致
       ki: 2.0            # 与 Python speed_pid 一致
       kd: 0.1            # 与 Python speed_pid 一致
-      i_max: 1000.0       # 积分限幅
-      out_max: 5000.0   # 输出限幅（电压）
-      dead_zone: 5.0     # 速度死区 (5 RPM)
+      i_max: 1500.0      # 积分限幅
+      out_max: 16384.0   # 输出限幅（电压）
+      dead_zone: 1.0     # 速度死区 (5 RPM)
   
   # GM3508 电机（电流控制）
   GM3508:
