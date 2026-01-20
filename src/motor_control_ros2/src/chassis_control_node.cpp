@@ -40,12 +40,23 @@ public:
         // 电机映射参数
         this->declare_parameter("fl_steer_motor", "DJI6020_1");
         this->declare_parameter("fl_drive_motor", "DJI3508_1");
+        this->declare_parameter("fl_steer_offset", 0.0);
+        this->declare_parameter("fl_drive_direction", 1);
+        
         this->declare_parameter("fr_steer_motor", "DJI6020_2");
         this->declare_parameter("fr_drive_motor", "DJI3508_2");
+        this->declare_parameter("fr_steer_offset", 0.0);
+        this->declare_parameter("fr_drive_direction", -1);
+        
         this->declare_parameter("rl_steer_motor", "DJI6020_3");
         this->declare_parameter("rl_drive_motor", "DJI3508_3");
+        this->declare_parameter("rl_steer_offset", 0.0);
+        this->declare_parameter("rl_drive_direction", 1);
+        
         this->declare_parameter("rr_steer_motor", "DJI6020_4");
         this->declare_parameter("rr_drive_motor", "DJI3508_4");
+        this->declare_parameter("rr_steer_offset", 0.0);
+        this->declare_parameter("rr_drive_direction", -1);
         
         // 读取参数
         control_frequency_ = this->get_parameter("control_frequency").as_double();
@@ -55,15 +66,26 @@ public:
         max_linear_velocity_ = this->get_parameter("max_linear_velocity").as_double();
         max_angular_velocity_ = this->get_parameter("max_angular_velocity").as_double();
         
-        // 读取电机映射
+        // 读取电机映射和配置
         motor_names_.fl_steer = this->get_parameter("fl_steer_motor").as_string();
         motor_names_.fl_drive = this->get_parameter("fl_drive_motor").as_string();
+        motor_config_.fl_steer_offset = this->get_parameter("fl_steer_offset").as_double();
+        motor_config_.fl_drive_direction = this->get_parameter("fl_drive_direction").as_int();
+        
         motor_names_.fr_steer = this->get_parameter("fr_steer_motor").as_string();
         motor_names_.fr_drive = this->get_parameter("fr_drive_motor").as_string();
+        motor_config_.fr_steer_offset = this->get_parameter("fr_steer_offset").as_double();
+        motor_config_.fr_drive_direction = this->get_parameter("fr_drive_direction").as_int();
+        
         motor_names_.rl_steer = this->get_parameter("rl_steer_motor").as_string();
         motor_names_.rl_drive = this->get_parameter("rl_drive_motor").as_string();
+        motor_config_.rl_steer_offset = this->get_parameter("rl_steer_offset").as_double();
+        motor_config_.rl_drive_direction = this->get_parameter("rl_drive_direction").as_int();
+        
         motor_names_.rr_steer = this->get_parameter("rr_steer_motor").as_string();
         motor_names_.rr_drive = this->get_parameter("rr_drive_motor").as_string();
+        motor_config_.rr_steer_offset = this->get_parameter("rr_steer_offset").as_double();
+        motor_config_.rr_drive_direction = this->get_parameter("rr_drive_direction").as_int();
         
         // 初始化运动学
         kinematics_ = std::make_unique<SteerWheelKinematics>(
@@ -113,6 +135,12 @@ private:
         std::string rr_steer, rr_drive;
     };
     
+    // 电机配置（零位偏移和方向）
+    struct MotorConfig {
+        double fl_steer_offset, fr_steer_offset, rl_steer_offset, rr_steer_offset;  // 转向零位偏移（度）
+        int fl_drive_direction, fr_drive_direction, rl_drive_direction, rr_drive_direction;  // 驱动方向 (1 或 -1)
+    };
+    
     // 底盘速度命令回调
     void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
         // 限制速度
@@ -146,30 +174,30 @@ private:
             fl_cmd, fr_cmd, rl_cmd, rr_cmd
         );
         
-        // 舵角优化（最短路径）
+        // 舵角优化（最短路径）- 使用零位偏移修正后的角度
         if (motor_states_.count(motor_names_.fl_steer)) {
-            double current_angle = motor_states_[motor_names_.fl_steer].angle;
+            double current_angle = motor_states_[motor_names_.fl_steer].angle - motor_config_.fl_steer_offset;
             fl_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
                 current_angle, fl_cmd.angle, fl_cmd.velocity
             );
         }
         
         if (motor_states_.count(motor_names_.fr_steer)) {
-            double current_angle = motor_states_[motor_names_.fr_steer].angle;
+            double current_angle = motor_states_[motor_names_.fr_steer].angle - motor_config_.fr_steer_offset;
             fr_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
                 current_angle, fr_cmd.angle, fr_cmd.velocity
             );
         }
         
         if (motor_states_.count(motor_names_.rl_steer)) {
-            double current_angle = motor_states_[motor_names_.rl_steer].angle;
+            double current_angle = motor_states_[motor_names_.rl_steer].angle - motor_config_.rl_steer_offset;
             rl_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
                 current_angle, rl_cmd.angle, rl_cmd.velocity
             );
         }
         
         if (motor_states_.count(motor_names_.rr_steer)) {
-            double current_angle = motor_states_[motor_names_.rr_steer].angle;
+            double current_angle = motor_states_[motor_names_.rr_steer].angle - motor_config_.rr_steer_offset;
             rr_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
                 current_angle, rr_cmd.angle, rr_cmd.velocity
             );
@@ -190,16 +218,20 @@ private:
         auto now = this->now();
         
         // 左前舵轮
-        publishWheelCommand(motor_names_.fl_steer, motor_names_.fl_drive, fl, now);
+        publishWheelCommand(motor_names_.fl_steer, motor_names_.fl_drive, fl, now,
+                           motor_config_.fl_steer_offset, motor_config_.fl_drive_direction);
         
         // 右前舵轮
-        publishWheelCommand(motor_names_.fr_steer, motor_names_.fr_drive, fr, now);
+        publishWheelCommand(motor_names_.fr_steer, motor_names_.fr_drive, fr, now,
+                           motor_config_.fr_steer_offset, motor_config_.fr_drive_direction);
         
         // 左后舵轮
-        publishWheelCommand(motor_names_.rl_steer, motor_names_.rl_drive, rl, now);
+        publishWheelCommand(motor_names_.rl_steer, motor_names_.rl_drive, rl, now,
+                           motor_config_.rl_steer_offset, motor_config_.rl_drive_direction);
         
         // 右后舵轮
-        publishWheelCommand(motor_names_.rr_steer, motor_names_.rr_drive, rr, now);
+        publishWheelCommand(motor_names_.rr_steer, motor_names_.rr_drive, rr, now,
+                           motor_config_.rr_steer_offset, motor_config_.rr_drive_direction);
     }
     
     // 发布单个舵轮命令
@@ -207,17 +239,20 @@ private:
         const std::string& steer_name,
         const std::string& drive_name,
         const WheelCommand& cmd,
-        const rclcpp::Time& timestamp)
+        const rclcpp::Time& timestamp,
+        double steer_offset,
+        int drive_direction)
     {
-        // 转向电机命令（位置控制）
+        // 转向电机命令（位置控制）- 应用零位偏移
         auto steer_msg = motor_control_ros2::msg::DJIMotorCommandAdvanced();
         steer_msg.header.stamp = timestamp;
         steer_msg.joint_name = steer_name;
         steer_msg.mode = motor_control_ros2::msg::DJIMotorCommandAdvanced::MODE_POSITION;
-        steer_msg.position_target = cmd.angle * M_PI / 180.0;  // 转换为弧度
+        // 目标角度 = 运动学计算角度 + 零位偏移
+        steer_msg.position_target = (cmd.angle + steer_offset) * M_PI / 180.0;  // 转换为弧度
         motor_cmd_pub_->publish(steer_msg);
         
-        // 驱动电机命令（速度控制）
+        // 驱动电机命令（速度控制）- 应用方向修正
         // 将线速度转换为 RPM
         double wheel_radius = 0.055;  // TODO: 从参数获取
         double rpm = (cmd.velocity / (2.0 * M_PI * wheel_radius)) * 60.0;
@@ -226,7 +261,8 @@ private:
         drive_msg.header.stamp = timestamp;
         drive_msg.joint_name = drive_name;
         drive_msg.mode = motor_control_ros2::msg::DJIMotorCommandAdvanced::MODE_VELOCITY;
-        drive_msg.velocity_target = rpm * M_PI / 30.0;  // 转换为弧度/秒
+        // 应用方向修正：1=正转向前，-1=正转向后
+        drive_msg.velocity_target = rpm * M_PI / 30.0 * drive_direction;  // 转换为弧度/秒并应用方向
         motor_cmd_pub_->publish(drive_msg);
     }
     
@@ -290,6 +326,7 @@ private:
     // 成员变量
     std::unique_ptr<SteerWheelKinematics> kinematics_;
     MotorNames motor_names_;
+    MotorConfig motor_config_;
     
     // 参数
     double control_frequency_;

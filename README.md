@@ -400,7 +400,9 @@ ros2 run motor_control_ros2 motor_control_node
 
 - `.agent/yaml_config_guide.md` - YAML 配置详细指南
 - `.agent/refactor_complete.md` - 系统重构总结
+- `.agent/chassis_motor_calibration.md` - 底盘电机零位和方向标定指南
 - `src/motor_control_ros2/config/motors.yaml` - 电机配置示例
+- `src/motor_control_ros2/config/chassis_params.yaml` - 底盘参数配置
 
 ---
 

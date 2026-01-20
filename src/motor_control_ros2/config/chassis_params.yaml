@@ -16,15 +16,23 @@ chassis_control_node:
     # 左前舵轮单元
     fl_steer_motor: "DJI6020_1"  # 左前转向
     fl_drive_motor: "DJI3508_1"  # 左前驱动
+    fl_steer_offset: 330.8       # 转向零位偏移（度），正前方时的编码器角度
+    fl_drive_direction: 1        # 驱动方向：1=正转向前，-1=正转向后
     
     # 右前舵轮单元
     fr_steer_motor: "DJI6020_2"  # 右前转向
     fr_drive_motor: "DJI3508_2"  # 右前驱动
+    fr_steer_offset: 89.6         # 转向零位偏移（度）
+    fr_drive_direction: -1       # 驱动方向：对称安装，正转向后
     
     # 左后舵轮单元
     rl_steer_motor: "DJI6020_3"  # 左后转向
     rl_drive_motor: "DJI3508_3"  # 左后驱动
+    rl_steer_offset: 207.1         # 转向零位偏移（度）
+    rl_drive_direction: 1        # 驱动方向：正转向前
     
     # 右后舵轮单元
     rr_steer_motor: "DJI6020_4"  # 右后转向
     rr_drive_motor: "DJI3508_4"  # 右后驱动
+    rr_steer_offset: 33.0         # 转向零位偏移（度）
+    rr_drive_direction: -1       # 驱动方向：对称安装，正转向后
