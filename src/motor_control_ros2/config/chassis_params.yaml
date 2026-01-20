@@ -1,0 +1,30 @@
+chassis_control_node:
+  ros__parameters:
+    # 控制频率
+    control_frequency: 100.0  # Hz
+    
+    # 底盘几何参数（根据用户提供的参数）
+    wheel_base_x: 0.65    # 前后轮距 (m) - 650mm
+    wheel_base_y: 0.62    # 左右轴距 (m) - 620mm
+    wheel_radius: 0.055   # 轮子半径 (m) - 55mm
+    
+    # 速度限制
+    max_linear_velocity: 2.0   # 最大线速度 (m/s)
+    max_angular_velocity: 3.14 # 最大角速度 (rad/s)
+    
+    # 电机映射（对应 motors.yaml 中的名称）
+    # 左前舵轮单元
+    fl_steer_motor: "DJI6020_1"  # 左前转向
+    fl_drive_motor: "DJI3508_1"  # 左前驱动
+    
+    # 右前舵轮单元
+    fr_steer_motor: "DJI6020_2"  # 右前转向
+    fr_drive_motor: "DJI3508_2"  # 右前驱动
+    
+    # 左后舵轮单元
+    rl_steer_motor: "DJI6020_3"  # 左后转向
+    rl_drive_motor: "DJI3508_3"  # 左后驱动
+    
+    # 右后舵轮单元
+    rr_steer_motor: "DJI6020_4"  # 右后转向
+    rr_drive_motor: "DJI3508_4"  # 右后驱动

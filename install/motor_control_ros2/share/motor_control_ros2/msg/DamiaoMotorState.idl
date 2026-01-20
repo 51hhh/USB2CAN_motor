@@ -1,0 +1,45 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from motor_control_ros2/msg/DamiaoMotorState.msg
+// generated code does not contain a copyright notice
+
+#include "std_msgs/msg/Header.idl"
+
+module motor_control_ros2 {
+  module msg {
+    struct DamiaoMotorState {
+      std_msgs::msg::Header header;
+
+      string joint_name;
+
+      @verbatim (language="comment", text=
+        "\"DM4310\", \"DM4340\" 等")
+      string model;
+
+      boolean online;
+
+      @verbatim (language="comment", text=
+        "位置（弧度）")
+      float position;
+
+      @verbatim (language="comment", text=
+        "速度（弧度/秒）")
+      float velocity;
+
+      @verbatim (language="comment", text=
+        "力矩（Nm）")
+      float torque;
+
+      @verbatim (language="comment", text=
+        "MOS 温度")
+      uint8 temp_mos;
+
+      @verbatim (language="comment", text=
+        "转子温度")
+      uint8 temp_rotor;
+
+      @verbatim (language="comment", text=
+        "错误码")
+      uint8 error_code;
+    };
+  };
+};

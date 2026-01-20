@@ -1,0 +1,27 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from motor_control_ros2/msg/ControlFrequency.msg
+// generated code does not contain a copyright notice
+
+#include "std_msgs/msg/Header.idl"
+
+module motor_control_ros2 {
+  module msg {
+    @verbatim (language="comment", text=
+      "控制系统频率统计消息")
+    struct ControlFrequency {
+      std_msgs::msg::Header header;
+
+      @verbatim (language="comment", text=
+        "实际控制循环频率 (Hz)")
+      double control_frequency;
+
+      @verbatim (language="comment", text=
+        "CAN 发送频率 (Hz)")
+      double can_tx_frequency;
+
+      @verbatim (language="comment", text=
+        "目标控制频率 (Hz)")
+      double target_frequency;
+    };
+  };
+};

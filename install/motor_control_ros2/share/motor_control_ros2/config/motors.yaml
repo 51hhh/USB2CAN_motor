@@ -1,0 +1,93 @@
+# 电机配置文件
+# 支持多个 CAN 和串口接口，每个接口可以配置多个电机
+
+# CAN 接口配置
+can_interfaces:
+  - device: /dev/ttyACM0
+    baudrate: 921600
+    motors:
+      # 左前舵轮单元
+      - name: DJI6020_1          # 左前转向电机
+        type: GM6020
+        id: 1
+      
+      
+      # 右前舵轮单元
+      - name: DJI6020_2          # 右前转向电机
+        type: GM6020
+        id: 2
+      
+      # 左后舵轮单元
+      - name: DJI6020_3          # 左后转向电机
+        type: GM6020
+        id: 3
+
+      # 右后舵轮单元
+      - name: DJI6020_4          # 右后转向电机
+        type: GM6020
+        id: 4
+  
+  - device: /dev/ttyACM1
+    baudrate: 921600
+    motors:
+      - name: DJI3508_1          # 左前驱动电机
+        type: GM3508
+        id: 1
+      - name: DJI3508_2          # 左前驱动电机
+        type: GM3508
+        id: 2
+      - name: DJI3508_3          # 左前驱动电机
+        type: GM3508
+        id: 3
+      - name: DJI3508_4          # 左前驱动电机
+        type: GM3508
+        id: 4
+
+  # CAN 接口 2 (如果有多个 USB-CAN 适配器)
+  # - device: /dev/ttyACM1
+  #   baudrate: 921600
+  #   motors:
+  #     # 达妙电机示例
+  #     - name: joint1_motor
+  #       type: DM4340           # 电机类型: DM4340, DM4310
+  #       id: 1                  # 电机 ID
+  #     
+  #     - name: joint2_motor
+  #       type: DM4340
+  #       id: 2
+
+# 串口接口配置（宇树电机）
+serial_interfaces:
+  # 串口接口 1
+  # - device: /dev/ttyUSB0
+  #   baudrate: 4000000
+  #   motors:
+  #     # 宇树 A1 电机示例
+  #     - name: fl_hip_motor     # 电机名称
+  #       type: A1               # 电机类型: A1, GO8010
+  #       id: 0                  # 电机 ID
+  #       direction: 1           # 方向: 1 或 -1
+  #       offset: 0.0            # 零点偏移（弧度）
+  #     
+  #     - name: fl_knee_motor
+  #       type: A1
+  #       id: 1
+  #       direction: 1
+  #       offset: 0.0
+  
+  # 串口接口 2 (如果有多个 USB-485 适配器)
+  # - device: /dev/ttyUSB1
+  #   baudrate: 4000000
+  #   motors:
+  #     - name: fr_hip_motor
+  #       type: GO8010
+  #       id: 0
+  #       direction: 1
+  #       offset: 0.0
+
+# 配置说明:
+# 1. 取消注释需要使用的接口和电机
+# 2. 修改 device 路径为实际设备
+# 3. 设置正确的电机 ID
+# 4. 确保电机名称唯一
+# 5. 保存后重启控制节点

@@ -1,0 +1,41 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from motor_control_ros2/msg/UnitreeGO8010Command.msg
+// generated code does not contain a copyright notice
+
+#include "std_msgs/msg/Header.idl"
+
+module motor_control_ros2 {
+  module msg {
+    struct UnitreeGO8010Command {
+      std_msgs::msg::Header header;
+
+      string joint_name;
+
+      uint8 motor_id;
+
+      @verbatim (language="comment", text=
+        "0:空闲, 5:开环, 10:闭环FOC")
+      uint8 mode;
+
+      @verbatim (language="comment", text=
+        "关节刚度系数")
+      float kp;
+
+      @verbatim (language="comment", text=
+        "关节速度系数")
+      float kd;
+
+      @verbatim (language="comment", text=
+        "期望位置（弧度）")
+      float pos_des;
+
+      @verbatim (language="comment", text=
+        "期望速度（弧度/秒）")
+      float vel_des;
+
+      @verbatim (language="comment", text=
+        "期望力矩（Nm）")
+      float torque_ff;
+    };
+  };
+};

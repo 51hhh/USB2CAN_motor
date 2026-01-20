@@ -1,0 +1,79 @@
+# PID 参数配置文件
+# 与 Python 实现一致的参数和单位
+# 位置环使用度 (0-360)，速度环使用 RPM
+
+dji_motors:
+  # GM6020 电机（电压控制）
+  # 参数与 python/src/main.py 一致
+  GM6020:
+    # 角度环 (外环) - 单位: 度
+    position_pid:
+      kp: 20.0           # 与 Python angle_pid 一致
+      ki: 1.0            # 与 Python angle_pid 一致
+      kd: 0.0            # 与 Python angle_pid 一致
+      i_max: 50.0        # 积分限幅 (RPM)
+      out_max: 700.0     # 输出限幅 (目标 RPM)
+      dead_zone: 0.1       # 位置死区
+    
+    # 速度环 (内环) - 单位: RPM
+    velocity_pid:
+      kp: 40.0           # 与 Python speed_pid 一致
+      ki: 2.0            # 与 Python speed_pid 一致
+      kd: 0.1            # 与 Python speed_pid 一致
+      i_max: 1500.0      # 积分限幅
+      out_max: 16384.0   # 输出限幅（电压）
+      dead_zone: 1.0     # 速度死区 (5 RPM)
+  
+  # GM3508 电机（电流控制）
+  GM3508:
+    # 角度环 (外环) - 单位: 度
+    position_pid:
+      kp: 20.0           # 位置比例系数
+      ki: 0.0            # 位置积分系数
+      kd: 0.0            # 位置微分系数
+      i_max: 30.0        # 积分限幅
+      out_max: 1000.0     # 输出限幅（目标 RPM）
+      dead_zone: 0.5     # 位置死区（度）
+    
+    # 速度环 (内环) - 单位: RPM
+    velocity_pid:
+      kp: 8.0           # 速度比例系数
+      ki: 1.0            # 速度积分系数
+      kd: 0.5            # 速度微分系数
+      i_max: 2000.0       # 积分限幅
+      out_max: 16384.0   # 输出限幅（电流限制）
+      dead_zone: 5.0     # 速度死区（RPM）
+
+# 每个电机的参数覆盖（可选）
+# 如果某个电机需要特殊参数，可以在这里配置
+motor_overrides:
+  # 示例：为 DJI6020_1 设置特殊参数
+  # DJI6020_1:
+  #   position_pid:
+  #     kp: 60.0        # 覆盖默认的 50.0
+  #     kd: 8.0         # 覆盖默认的 5.0
+  #   velocity_pid:
+  #     kp: 600.0       # 覆盖默认的 500.0
+
+# 参数调试说明：
+# 
+# 1. 位置环调试（先调位置环，速度环设为纯 P 控制）：
+#    - 从小的 kp 开始（如 10），逐渐增大直到响应足够快
+#    - 如果有超调，增加 kd
+#    - 如果有稳态误差且无法接受，小心增加 ki
+#    - out_max 限制位置环输出的最大速度
+#
+# 2. 速度环调试（位置环固定后调速度环）：
+#    - 从小的 kp 开始，逐渐增大
+#    - 如果速度跟踪有稳态误差，增加 ki
+#    - 如果有高频震荡，增加 kd 或减小 kp
+#    - out_max 是电机的最大输出（电流/电压）
+#
+# 3. 死区设置：
+#    - position dead_zone: 设置为可接受的位置误差
+#    - velocity dead_zone: 设置为可接受的速度误差
+#    - 死区太大会降低精度，太小会导致震荡
+#
+# 4. 积分限幅：
+#    - i_max 防止积分饱和
+#    - 通常设置为 out_max 的 20%-50%

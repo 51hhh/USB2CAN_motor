@@ -1,0 +1,49 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from motor_control_ros2/msg/UnitreeGO8010State.msg
+// generated code does not contain a copyright notice
+
+#include "std_msgs/msg/Header.idl"
+
+module motor_control_ros2 {
+  module msg {
+    struct UnitreeGO8010State {
+      std_msgs::msg::Header header;
+
+      string joint_name;
+
+      @verbatim (language="comment", text=
+        "电机 ID")
+      uint8 motor_id;
+
+      @verbatim (language="comment", text=
+        "模式")
+      uint8 mode;
+
+      boolean online;
+
+      @verbatim (language="comment", text=
+        "位置（弧度）")
+      float position;
+
+      @verbatim (language="comment", text=
+        "速度（弧度/秒）")
+      float velocity;
+
+      @verbatim (language="comment", text=
+        "力矩（Nm）")
+      float torque;
+
+      @verbatim (language="comment", text=
+        "加速度")
+      int16 acceleration;
+
+      @verbatim (language="comment", text=
+        "温度")
+      int8 temperature;
+
+      @verbatim (language="comment", text=
+        "错误码")
+      int8 error;
+    };
+  };
+};

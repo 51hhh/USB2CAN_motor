@@ -1,0 +1,41 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from motor_control_ros2/msg/MotorStateGeneric.msg
+// generated code does not contain a copyright notice
+
+#include "std_msgs/msg/Header.idl"
+
+module motor_control_ros2 {
+  module msg {
+    struct MotorStateGeneric {
+      std_msgs::msg::Header header;
+
+      @verbatim (language="comment", text=
+        "关节名称")
+      string joint_name;
+
+      @verbatim (language="comment", text=
+        "电机类型: \"dji\", \"damiao\", \"unitree\"")
+      string motor_type;
+
+      @verbatim (language="comment", text=
+        "是否在线")
+      boolean online;
+
+      @verbatim (language="comment", text=
+        "位置（弧度）")
+      double position;
+
+      @verbatim (language="comment", text=
+        "速度（弧度/秒）")
+      double velocity;
+
+      @verbatim (language="comment", text=
+        "力矩（Nm）")
+      double torque;
+
+      @verbatim (language="comment", text=
+        "温度（摄氏度）")
+      float temperature;
+    };
+  };
+};

@@ -1,0 +1,41 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from motor_control_ros2/msg/DJIMotorState.msg
+// generated code does not contain a copyright notice
+
+#include "std_msgs/msg/Header.idl"
+
+module motor_control_ros2 {
+  module msg {
+    struct DJIMotorState {
+      std_msgs::msg::Header header;
+
+      string joint_name;
+
+      @verbatim (language="comment", text=
+        "\"GM3508\" 或 \"GM6020\"")
+      string model;
+
+      boolean online;
+
+      @verbatim (language="comment", text=
+        "角度（度，0-360）")
+      double angle;
+
+      @verbatim (language="comment", text=
+        "转速")
+      int16 rpm;
+
+      @verbatim (language="comment", text=
+        "实际电流")
+      int16 current;
+
+      @verbatim (language="comment", text=
+        "温度")
+      uint8 temperature;
+
+      @verbatim (language="comment", text=
+        "控制频率 (Hz)")
+      double control_frequency;
+    };
+  };
+};

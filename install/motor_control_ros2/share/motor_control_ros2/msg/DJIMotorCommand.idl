@@ -1,0 +1,19 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from motor_control_ros2/msg/DJIMotorCommand.msg
+// generated code does not contain a copyright notice
+
+#include "std_msgs/msg/Header.idl"
+
+module motor_control_ros2 {
+  module msg {
+    struct DJIMotorCommand {
+      std_msgs::msg::Header header;
+
+      string joint_name;
+
+      @verbatim (language="comment", text=
+        "GM3508: 电流值, GM6020: 电压值")
+      int16 output;
+    };
+  };
+};
