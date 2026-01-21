@@ -26,7 +26,7 @@ public:
               uint8_t can_id, uint8_t master_id, uint8_t bus_id = 0);
   
   // 实现基类纯虚函数
-  void updateFeedback(uint32_t can_id, const uint8_t* data, size_t len) override;
+  void updateFeedback(const std::string& interface_name, uint32_t can_id, const uint8_t* data, size_t len) override;
   void getControlFrame(uint32_t& can_id, uint8_t* data, size_t& len) override;
   void enable() override;
   void disable() override;

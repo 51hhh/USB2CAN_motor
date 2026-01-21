@@ -45,6 +45,9 @@ public:
     , velocity_(0.0)
     , torque_(0.0)
     , temperature_(0.0f)
+    , target_position_(0.0)
+    , target_velocity_(0.0)
+    , target_torque_(0.0)
   {}
   
   virtual ~MotorBase() = default;
@@ -53,11 +56,12 @@ public:
   
   /**
    * @brief 更新电机反馈数据
+   * @param interface_name 接口名称
    * @param can_id CAN 帧 ID
    * @param data 数据指针
    * @param len 数据长度
    */
-  virtual void updateFeedback(uint32_t can_id, const uint8_t* data, size_t len) = 0;
+  virtual void updateFeedback(const std::string& interface_name, uint32_t can_id, const uint8_t* data, size_t len) = 0;
   
   /**
    * @brief 获取控制帧数据

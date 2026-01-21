@@ -32,7 +32,12 @@ DamiaoMotor::DamiaoMotor(const std::string& joint_name, MotorType type,
   KD_MAX_ = 5.0f;
 }
 
-void DamiaoMotor::updateFeedback(uint32_t can_id, const uint8_t* data, size_t len) {
+void DamiaoMotor::updateFeedback(const std::string& interface_name, uint32_t can_id, const uint8_t* data, size_t len) {
+  // 检查接口名称匹配（多路 CAN 支持）
+  if (!interface_name_.empty() && interface_name != interface_name_) {
+    return;  // 不是该电机所属的接口
+  }
+  
   // 检查 Master ID（反馈帧 ID）
   if (can_id != master_id_ || len < 8) {
     return;

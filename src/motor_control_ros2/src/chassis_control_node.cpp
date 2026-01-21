@@ -62,7 +62,7 @@ public:
         control_frequency_ = this->get_parameter("control_frequency").as_double();
         double wheel_base_x = this->get_parameter("wheel_base_x").as_double();
         double wheel_base_y = this->get_parameter("wheel_base_y").as_double();
-        double wheel_radius = this->get_parameter("wheel_radius").as_double();
+        wheel_radius_ = this->get_parameter("wheel_radius").as_double();
         max_linear_velocity_ = this->get_parameter("max_linear_velocity").as_double();
         max_angular_velocity_ = this->get_parameter("max_angular_velocity").as_double();
         
@@ -89,12 +89,12 @@ public:
         
         // 初始化运动学
         kinematics_ = std::make_unique<SteerWheelKinematics>(
-            wheel_base_x, wheel_base_y, wheel_radius
+            wheel_base_x, wheel_base_y, wheel_radius_
         );
         
         RCLCPP_INFO(this->get_logger(), 
             "底盘控制节点启动 - 轮距: %.3fm, 轴距: %.3fm, 轮半径: %.3fm",
-            wheel_base_x, wheel_base_y, wheel_radius);
+            wheel_base_x, wheel_base_y, wheel_radius_);
         
         // 初始化时间戳（必须在创建订阅者之前，确保时间源一致）
         last_cmd_time_ = this->now();
@@ -257,8 +257,7 @@ private:
         
         // 驱动电机命令（速度控制）- 应用方向修正
         // 将线速度转换为 RPM
-        double wheel_radius = 0.055;  // TODO: 从参数获取
-        double rpm = (cmd.velocity / (2.0 * M_PI * wheel_radius)) * 60.0;
+        double rpm = (cmd.velocity / (2.0 * M_PI * wheel_radius_)) * 60.0;
         
         auto drive_msg = motor_control_ros2::msg::DJIMotorCommandAdvanced();
         drive_msg.header.stamp = timestamp;
@@ -322,7 +321,7 @@ private:
         }
         
         if (motor_states_.count(drive_name)) {
-            wheel_state.drive_velocity = motor_states_[drive_name].rpm * 0.055;  // RPM to m/s
+            wheel_state.drive_velocity = motor_states_[drive_name].rpm * wheel_radius_;  // RPM to m/s
         }
     }
     
@@ -333,6 +332,7 @@ private:
     
     // 参数
     double control_frequency_;
+    double wheel_radius_;
     double max_linear_velocity_;
     double max_angular_velocity_;
     

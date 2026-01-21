@@ -76,7 +76,7 @@ public:
   // 注意：宇树电机协议非常特殊，通常不是通过标准的 "updateFeedback" (CAN风格) 来更新
   // 而是通过串口收发。这里我们可能需要稍微调整接口用法，或者由管理器调用专门的 updateSerial()。
   // 为了兼容 Frame work，我们保留接口但可能不完全使用 can_id 参数。
-  void updateFeedback(uint32_t can_id, const uint8_t* data, size_t len) override;
+  void updateFeedback(const std::string& interface_name, uint32_t can_id, const uint8_t* data, size_t len) override;
   void getControlFrame(uint32_t& can_id, uint8_t* data, size_t& len) override;
   void enable() override;
   void disable() override;

@@ -85,11 +85,11 @@ public:
     // 初始化 CAN 网络
     can_network_ = std::make_shared<hardware::CANNetwork>();
     
-    // 设置 CAN 接收回调
+    // 设置 CAN 接收回调（添加接口名称参数）
     can_network_->setGlobalRxCallback(
       std::bind(&MotorControlNode::canRxCallback, this,
                 std::placeholders::_1, std::placeholders::_2,
-                std::placeholders::_3)
+                std::placeholders::_3, std::placeholders::_4)
     );
     
     // 从配置文件初始化电机
@@ -125,6 +125,16 @@ public:
       std::chrono::microseconds(static_cast<int>(1e6 / control_freq)),
       std::bind(&MotorControlNode::controlLoop, this)
     );
+    
+    // 启动设备重连定时器（每 2 秒检查一次）
+    if (can_network_->getPendingCount() > 0) {
+      reconnect_timer_ = this->create_wall_timer(
+        std::chrono::seconds(2),
+        std::bind(&MotorControlNode::checkReconnect, this)
+      );
+      RCLCPP_WARN(this->get_logger(), "有 %zu 个 CAN 设备待连接，将每 2 秒重试",
+                  can_network_->getPendingCount());
+    }
     
     // 初始化频率统计
     last_freq_report_time_ = this->now();
@@ -359,17 +369,44 @@ private:
     );
   }
   
-  void canRxCallback(uint32_t can_id, const uint8_t* data, size_t len) {
-    // 调试日志：显示接收到的 CAN 帧
+  void canRxCallback(const std::string& interface_name, uint32_t can_id, const uint8_t* data, size_t len) {
+    // 调试日志：显示接收到的 CAN 帧（包含接口来源）
     RCLCPP_DEBUG_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-                         "[CAN RX] ID: 0x%03X, Len: %zu, Data: %02X %02X %02X %02X %02X %02X %02X %02X",
-                         can_id, len, 
+                         "[CAN RX] %s ID: 0x%03X, Len: %zu, Data: %02X %02X %02X %02X %02X %02X %02X %02X",
+                         interface_name.c_str(), can_id, len, 
                          data[0], data[1], data[2], data[3], 
                          data[4], data[5], data[6], data[7]);
     
-    // 将 CAN 帧分发给对应的电机
+    // 将 CAN 帧分发给对应的电机（传递接口名称用于过滤）
     for (auto& [name, motor] : motors_) {
-      motor->updateFeedback(can_id, data, len);
+      motor->updateFeedback(interface_name, can_id, data, len);
+    }
+  }
+  
+  /**
+   * @brief 检查并重试连接失败的 CAN 设备
+   */
+  void checkReconnect() {
+    int connected = can_network_->retryPendingInterfaces();
+    
+    if (connected > 0) {
+      RCLCPP_INFO(this->get_logger(), "成功重连 %d 个 CAN 设备", connected);
+    }
+    
+    // 如果所有设备都已连接，停止重连定时器
+    if (can_network_->getPendingCount() == 0) {
+      RCLCPP_INFO(this->get_logger(), "所有 CAN 设备已连接，停止重连检测");
+      reconnect_timer_->cancel();
+      reconnect_timer_.reset();
+    } else {
+      // 输出待连接设备列表
+      auto pending = can_network_->getPendingDevices();
+      std::string devices_str;
+      for (const auto& dev : pending) {
+        if (!devices_str.empty()) devices_str += ", ";
+        devices_str += dev;
+      }
+      RCLCPP_DEBUG(this->get_logger(), "待连接设备: %s", devices_str.c_str());
     }
   }
   
@@ -823,6 +860,7 @@ private:
   std::vector<std::shared_ptr<DJIMotor>> dji_motors_;
   
   rclcpp::TimerBase::SharedPtr control_timer_;
+  rclcpp::TimerBase::SharedPtr reconnect_timer_;  // 设备重连定时器
   
   rclcpp::Publisher<motor_control_ros2::msg::DJIMotorState>::SharedPtr dji_state_pub_;
   rclcpp::Publisher<motor_control_ros2::msg::DamiaoMotorState>::SharedPtr damiao_state_pub_;

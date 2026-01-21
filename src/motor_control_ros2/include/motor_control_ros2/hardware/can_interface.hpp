@@ -34,11 +34,12 @@ struct CANFrame {
 
 /**
  * @brief CAN 接收回调函数类型
+ * @param interface_name 接口名称
  * @param can_id CAN 帧 ID
  * @param data 数据指针
  * @param len 数据长度
  */
-using CANRxCallback = std::function<void(uint32_t can_id, const uint8_t* data, size_t len)>;
+using CANRxCallback = std::function<void(const std::string& interface_name, uint32_t can_id, const uint8_t* data, size_t len)>;
 
 /**
  * @brief 线程安全的 CAN 帧队列
@@ -172,7 +173,7 @@ public:
    * @brief 打开串口
    * @return 成功返回 true
    */
-  bool open();
+  bool open(bool silent = false);
   
   /**
    * @brief 关闭串口
@@ -240,6 +241,17 @@ public:
   void stopRxThread();
   
   /**
+   * @brief 设置接口名称（用于回调中标识来源）
+   * @param name 接口名称
+   */
+  void setInterfaceName(const std::string& name) { interface_name_ = name; }
+  
+  /**
+   * @brief 获取接口名称
+   */
+  std::string getInterfaceName() const { return interface_name_; }
+  
+  /**
    * @brief 获取统计信息
    */
   struct Statistics {
@@ -258,6 +270,7 @@ public:
 private:
   // 串口配置
   std::string port_;
+  std::string interface_name_;  // 接口名称（用于回调）
   int baudrate_;
   int fd_;  // 文件描述符
   
@@ -292,7 +305,7 @@ private:
 /**
  * @brief CAN 网络管理类
  * 
- * 管理多条 CAN 总线。
+ * 管理多条 CAN 总线，支持设备热插拔重连。
  */
 class CANNetwork {
 public:
@@ -302,6 +315,15 @@ public:
   // 禁止拷贝和移动
   CANNetwork(const CANNetwork&) = delete;
   CANNetwork& operator=(const CANNetwork&) = delete;
+  
+  /**
+   * @brief 待连接接口信息
+   */
+  struct PendingInterface {
+    std::string name;
+    std::string port;
+    int baudrate;
+  };
   
   /**
    * @brief 添加 CAN 接口
@@ -364,9 +386,26 @@ public:
    * @brief 关闭所有接口
    */
   void closeAll();
+  
+  /**
+   * @brief 重试连接失败的设备
+   * @return 成功连接的设备数量
+   */
+  int retryPendingInterfaces();
+  
+  /**
+   * @brief 获取待连接设备数量
+   */
+  size_t getPendingCount() const;
+  
+  /**
+   * @brief 获取待连接设备列表（用于日志）
+   */
+  std::vector<std::string> getPendingDevices() const;
 
 private:
   std::map<std::string, std::shared_ptr<CANInterface>> interfaces_;
+  std::vector<PendingInterface> pending_interfaces_;  // 待连接的接口
   CANRxCallback global_rx_callback_;
   mutable std::mutex mutex_;
 };

@@ -40,7 +40,12 @@ DJIMotor::DJIMotor(const std::string& joint_name, MotorType type,
   cascade_controller_.setMode(ControlMode::DIRECT);
 }
 
-void DJIMotor::updateFeedback(uint32_t can_id, const uint8_t* data, size_t len) {
+void DJIMotor::updateFeedback(const std::string& interface_name, uint32_t can_id, const uint8_t* data, size_t len) {
+  // 检查接口名称匹配（多路 CAN 支持）
+  if (!interface_name_.empty() && interface_name != interface_name_) {
+    return;  // 不是该电机所属的接口
+  }
+  
   if (can_id != feedback_id_ || len < 8) {
     return;
   }

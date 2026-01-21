@@ -31,7 +31,7 @@ UnitreeMotor::UnitreeMotor(const std::string& joint_name, MotorType type,
   rotor_t_ff_ = 0.0f;
 }
 
-void UnitreeMotor::updateFeedback(uint32_t /*can_id*/, const uint8_t* /*data*/, size_t /*len*/) {
+void UnitreeMotor::updateFeedback(const std::string& /*interface_name*/, uint32_t /*can_id*/, const uint8_t* /*data*/, size_t /*len*/) {
   // 宇树电机不使用此 CAN 接口回调
   // 而是通过 receiveFeedback() 主动读取串口
 }

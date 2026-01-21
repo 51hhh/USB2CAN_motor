@@ -29,19 +29,23 @@ CANInterface::~CANInterface() {
   close();
 }
 
-bool CANInterface::open() {
+bool CANInterface::open(bool silent) {
   // 打开串口
   fd_ = ::open(port_.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
   if (fd_ < 0) {
-    std::cerr << "[CANInterface] 无法打开串口: " << port_ 
-              << " (错误: " << strerror(errno) << ")" << std::endl;
+    if (!silent) {
+      std::cerr << "[CANInterface] 无法打开串口: " << port_ 
+                << " (错误: " << strerror(errno) << ")" << std::endl;
+    }
     return false;
   }
   
   // 配置串口
   struct termios tty;
   if (tcgetattr(fd_, &tty) != 0) {
-    std::cerr << "[CANInterface] tcgetattr 失败" << std::endl;
+    if (!silent) {
+      std::cerr << "[CANInterface] tcgetattr 失败" << std::endl;
+    }
     ::close(fd_);
     fd_ = -1;
     return false;
@@ -379,9 +383,9 @@ void CANInterface::receiveLoop() {
         }
       }
       
-      // 调用回调
+      // 调用回调（传递接口名称）
       if (rx_callback_) {
-        rx_callback_(frame.can_id, frame.data, frame.len);
+        rx_callback_(interface_name_, frame.can_id, frame.data, frame.len);
       }
     }
     
@@ -428,10 +432,28 @@ bool CANNetwork::addInterface(const std::string& name, const std::string& port, 
     return false;
   }
   
+  // 检查是否在待连接列表中
+  for (const auto& pending : pending_interfaces_) {
+    if (pending.name == name) {
+      std::cerr << "[CANNetwork] 接口已在待连接列表中: " << name << std::endl;
+      return false;
+    }
+  }
+  
   auto interface = std::make_shared<CANInterface>(port, baudrate);
   if (!interface->open()) {
+    // 打开失败，添加到待连接列表
+    PendingInterface pending;
+    pending.name = name;
+    pending.port = port;
+    pending.baudrate = baudrate;
+    pending_interfaces_.push_back(pending);
+    std::cout << "[CANNetwork] 设备 " << port << " 当前不可用，已加入待连接列表" << std::endl;
     return false;
   }
+  
+  // 设置接口名称（用于回调中识别来源）
+  interface->setInterfaceName(name);
   
   // 设置回调（转发到全局回调）
   if (global_rx_callback_) {
@@ -514,6 +536,57 @@ void CANNetwork::closeAll() {
   }
   
   interfaces_.clear();
+}
+
+int CANNetwork::retryPendingInterfaces() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  
+  if (pending_interfaces_.empty()) {
+    return 0;
+  }
+  
+  int connected_count = 0;
+  std::vector<PendingInterface> still_pending;
+  
+  for (const auto& pending : pending_interfaces_) {
+    auto interface = std::make_shared<CANInterface>(pending.port, pending.baudrate);
+    if (interface->open(true)) {  // 静默模式，不打印错误
+      // 成功连接
+      interface->setInterfaceName(pending.name);
+      
+      if (global_rx_callback_) {
+        interface->setRxCallback(global_rx_callback_);
+      }
+      
+      // 启动接收线程
+      interface->startRxThread();
+      
+      interfaces_[pending.name] = interface;
+      std::cout << "[CANNetwork] 重连成功: " << pending.name << " (" << pending.port << ")" << std::endl;
+      connected_count++;
+    } else {
+      // 仍然失败，保留在待连接列表
+      still_pending.push_back(pending);
+    }
+  }
+  
+  pending_interfaces_ = std::move(still_pending);
+  
+  return connected_count;
+}
+
+size_t CANNetwork::getPendingCount() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return pending_interfaces_.size();
+}
+
+std::vector<std::string> CANNetwork::getPendingDevices() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  std::vector<std::string> devices;
+  for (const auto& pending : pending_interfaces_) {
+    devices.push_back(pending.port);
+  }
+  return devices;
 }
 
 } // namespace hardware
