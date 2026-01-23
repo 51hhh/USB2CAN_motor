@@ -170,40 +170,64 @@ private:
             cmd_wz_ = 0.0;
         }
         
-        // 逆运动学解算
+        // 判断是否有实际运动命令（速度阈值：0.01 m/s 或 0.01 rad/s）
+        const double velocity_threshold = 0.01;
+        bool has_motion = (std::abs(cmd_vx_) > velocity_threshold) ||
+                         (std::abs(cmd_vy_) > velocity_threshold) ||
+                         (std::abs(cmd_wz_) > velocity_threshold);
+        
+        // 只在有运动命令时才执行控制
         WheelCommand fl_cmd, fr_cmd, rl_cmd, rr_cmd;
-        kinematics_->inverseKinematics(
-            cmd_vx_, cmd_vy_, cmd_wz_,
-            fl_cmd, fr_cmd, rl_cmd, rr_cmd
-        );
         
-        // 舵角优化（最短路径）- 使用零位偏移修正后的角度
-        if (motor_states_.count(motor_names_.fl_steer)) {
-            double current_angle = motor_states_[motor_names_.fl_steer].angle - motor_config_.fl_steer_offset;
-            fl_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
-                current_angle, fl_cmd.angle, fl_cmd.velocity
+        if (!has_motion) {
+            // 无运动命令时：所有舵轮转到机械零位（正前方，0 度）
+            // 驱动轮速度为 0
+            fl_cmd.angle = 0.0;  // 机械零位 = 0 度（正前方）
+            fl_cmd.velocity = 0.0;
+            
+            fr_cmd.angle = 0.0;
+            fr_cmd.velocity = 0.0;
+            
+            rl_cmd.angle = 0.0;
+            rl_cmd.velocity = 0.0;
+            
+            rr_cmd.angle = 0.0;
+            rr_cmd.velocity = 0.0;
+        } else {
+            // 有运动命令：执行逆运动学解算
+            kinematics_->inverseKinematics(
+                cmd_vx_, cmd_vy_, cmd_wz_,
+                fl_cmd, fr_cmd, rl_cmd, rr_cmd
             );
-        }
         
-        if (motor_states_.count(motor_names_.fr_steer)) {
-            double current_angle = motor_states_[motor_names_.fr_steer].angle - motor_config_.fr_steer_offset;
-            fr_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
-                current_angle, fr_cmd.angle, fr_cmd.velocity
-            );
-        }
-        
-        if (motor_states_.count(motor_names_.rl_steer)) {
-            double current_angle = motor_states_[motor_names_.rl_steer].angle - motor_config_.rl_steer_offset;
-            rl_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
-                current_angle, rl_cmd.angle, rl_cmd.velocity
-            );
-        }
-        
-        if (motor_states_.count(motor_names_.rr_steer)) {
-            double current_angle = motor_states_[motor_names_.rr_steer].angle - motor_config_.rr_steer_offset;
-            rr_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
-                current_angle, rr_cmd.angle, rr_cmd.velocity
-            );
+            // 舵角优化（最短路径）- 使用零位偏移修正后的角度
+            if (motor_states_.count(motor_names_.fl_steer)) {
+                double current_angle = motor_states_[motor_names_.fl_steer].angle - motor_config_.fl_steer_offset;
+                fl_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
+                    current_angle, fl_cmd.angle, fl_cmd.velocity
+                );
+            }
+            
+            if (motor_states_.count(motor_names_.fr_steer)) {
+                double current_angle = motor_states_[motor_names_.fr_steer].angle - motor_config_.fr_steer_offset;
+                fr_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
+                    current_angle, fr_cmd.angle, fr_cmd.velocity
+                );
+            }
+            
+            if (motor_states_.count(motor_names_.rl_steer)) {
+                double current_angle = motor_states_[motor_names_.rl_steer].angle - motor_config_.rl_steer_offset;
+                rl_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
+                    current_angle, rl_cmd.angle, rl_cmd.velocity
+                );
+            }
+            
+            if (motor_states_.count(motor_names_.rr_steer)) {
+                double current_angle = motor_states_[motor_names_.rr_steer].angle - motor_config_.rr_steer_offset;
+                rr_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
+                    current_angle, rr_cmd.angle, rr_cmd.velocity
+                );
+            }
         }
         
         // 发布电机命令
