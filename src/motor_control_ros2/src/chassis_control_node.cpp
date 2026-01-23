@@ -142,7 +142,7 @@ private:
         
         if (!has_motion) {
             // 无运动命令时：所有舵轮转到机械零位（正前方，0 度）
-            // 驱动轮速度为 0
+            // 注意：这里的 angle 是机械角度，后续会加上 offset 转换为编码器角度
             fl_cmd.angle = 0.0;  // 机械零位 = 0 度（正前方）
             fl_cmd.velocity = 0.0;
             
@@ -155,38 +155,45 @@ private:
             rr_cmd.angle = 0.0;
             rr_cmd.velocity = 0.0;
         } else {
-            // 有运动命令：执行逆运动学解算
+            // 有运动命令：执行逆运动学解算（得到机械角度）
             kinematics_->inverseKinematics(
                 cmd_vx_, cmd_vy_, cmd_wz_,
                 fl_cmd, fr_cmd, rl_cmd, rr_cmd
             );
         
-            // 舵角优化（最短路径）- 使用零位偏移修正后的角度
+            // 舵角优化（最短路径）
+            // 坐标转换说明：
+            // - offset: 机械零位(正前方)时的编码器角度
+            // - 机械角度 = 编码器角度 - offset
+            // - 编码器角度 = 机械角度 + offset
+            
             if (motor_states_.count(motor_names_.fl_steer)) {
-                double current_angle = motor_states_[motor_names_.fl_steer].angle - motor_config_.fl_steer_offset;
+                // 将编码器角度转换为机械角度
+                double current_mechanical_angle = motor_states_[motor_names_.fl_steer].angle - motor_config_.fl_steer_offset;
+                // 优化舵角（输入输出都是机械角度）
                 fl_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
-                    current_angle, fl_cmd.angle, fl_cmd.velocity
+                    current_mechanical_angle, fl_cmd.angle, fl_cmd.velocity
                 );
             }
             
             if (motor_states_.count(motor_names_.fr_steer)) {
-                double current_angle = motor_states_[motor_names_.fr_steer].angle - motor_config_.fr_steer_offset;
+                double current_mechanical_angle = motor_states_[motor_names_.fr_steer].angle - motor_config_.fr_steer_offset;
                 fr_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
-                    current_angle, fr_cmd.angle, fr_cmd.velocity
+                    current_mechanical_angle, fr_cmd.angle, fr_cmd.velocity
                 );
             }
             
             if (motor_states_.count(motor_names_.rl_steer)) {
-                double current_angle = motor_states_[motor_names_.rl_steer].angle - motor_config_.rl_steer_offset;
+                double current_mechanical_angle = motor_states_[motor_names_.rl_steer].angle - motor_config_.rl_steer_offset;
                 rl_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
-                    current_angle, rl_cmd.angle, rl_cmd.velocity
+                    current_mechanical_angle, rl_cmd.angle, rl_cmd.velocity
                 );
             }
             
             if (motor_states_.count(motor_names_.rr_steer)) {
-                double current_angle = motor_states_[motor_names_.rr_steer].angle - motor_config_.rr_steer_offset;
+                double current_mechanical_angle = motor_states_[motor_names_.rr_steer].angle - motor_config_.rr_steer_offset;
                 rr_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
-                    current_angle, rr_cmd.angle, rr_cmd.velocity
+                    current_mechanical_angle, rr_cmd.angle, rr_cmd.velocity
                 );
             }
         }
@@ -231,13 +238,18 @@ private:
         double steer_offset,
         int drive_direction)
     {
-        // 转向电机命令（位置控制）- 应用零位偏移
+        // 转向电机命令（位置控制）
         auto steer_msg = motor_control_ros2::msg::DJIMotorCommandAdvanced();
         steer_msg.header.stamp = timestamp;
         steer_msg.joint_name = steer_name;
         steer_msg.mode = motor_control_ros2::msg::DJIMotorCommandAdvanced::MODE_POSITION;
-        // 目标角度 = 运动学计算角度 + 零位偏移
-        steer_msg.position_target = (cmd.angle + steer_offset) * M_PI / 180.0;  // 转换为弧度
+        
+        // 坐标转换: 机械角度 -> 编码器角度
+        // cmd.angle 是机械角度(运动学计算结果)
+        // steer_offset 是机械零位时的编码器角度
+        // 编码器目标角度 = 机械角度 + offset
+        double encoder_angle_deg = cmd.angle + steer_offset;
+        steer_msg.position_target = encoder_angle_deg * M_PI / 180.0;  // 转换为弧度
         motor_cmd_pub_->publish(steer_msg);
         
         // 驱动电机命令（速度控制）- 应用方向修正
