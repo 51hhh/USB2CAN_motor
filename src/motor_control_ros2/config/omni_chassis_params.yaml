@@ -1,0 +1,37 @@
+# X 形全向轮底盘控制参数配置
+
+omni_chassis_control_node:
+  ros__parameters:
+    # 控制频率
+    control_frequency: 100.0        # Hz
+    
+    # 底盘机械参数
+    wheel_base_x: 0.88              # 前后轮距 (m)
+    wheel_base_y: 0.88              # 左右轮距 (m)
+    wheel_radius: 0.075            # 轮子半径 (m)
+    install_angle: 45.0             # 轮子安装角度 (度)，X 形布置为 45°
+    
+    # 速度限制
+    max_linear_velocity: 0.15      # 最大线速度 (m/s) - 对应约2500 RPM电机转速
+    max_angular_velocity: 0.15     # 最大角速度 (rad/s)
+    
+    # 命令超时
+    cmd_timeout: 0.5                # 速度命令超时时间 (s)
+    
+    # 电机映射（4 个 GM3508）
+    fl_motor: "DJI3508_1"           # 左前电机
+    fr_motor: "DJI3508_2"           # 右前电机
+    rl_motor: "DJI3508_3"           # 左后电机
+    rr_motor: "DJI3508_4"           # 右后电机
+
+# 配置说明:
+# 1. wheel_base_x: 从底盘中心到前轮（或后轮）的距离 * 2
+# 2. wheel_base_y: 从底盘中心到左轮（或右轮）的距离 * 2
+# 3. wheel_radius: 全向轮的有效半径（主动轮半径，不是辊子半径）
+# 4. install_angle: 全向轮安装角度（相对于底盘坐标系），X 形布置为 45°
+#    注意：这是整个轮子的安装角度，与麦克纳姆轮的辊子角度不同
+# 5. 电机名称必须与 motors.yaml 中配置的电机名称一致
+# 
+# 重要：全向轮(Omni Wheel) ≠ 麦克纳姆轮(Mecanum Wheel)
+# - 全向轮：整个轮子以45°安装，轮上的小辊子垂直于主轴
+# - 麦克纳姆轮：轮子正向安装，但辊子相对主轴成45°角
