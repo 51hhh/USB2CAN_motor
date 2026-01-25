@@ -2,32 +2,32 @@
 # 支持多个 CAN 和串口接口，每个接口可以配置多个电机
 
 # CAN 接口配置
-can_interfaces:
-  - device: /dev/ttyACM0
-    baudrate: 921600
-    motors:
-      # 左前舵轮单元
-      - name: DJI6020_1          # 左前转向电机
-        type: GM6020
-        id: 1
+ can_interfaces:
+#   - device: /dev/ttyACM1
+#     baudrate: 921600
+#     motors:
+#       # 左前舵轮单元
+#       - name: DJI6020_1          # 左前转向电机
+#         type: GM6020
+#         id: 1
       
       
-      # 右前舵轮单元
-      - name: DJI6020_2          # 右前转向电机
-        type: GM6020
-        id: 2
+#       # 右前舵轮单元
+#       - name: DJI6020_2          # 右前转向电机
+#         type: GM6020
+#         id: 2
       
-      # 左后舵轮单元
-      - name: DJI6020_3          # 左后转向电机
-        type: GM6020
-        id: 3
+#       # 左后舵轮单元
+#       - name: DJI6020_3          # 左后转向电机
+#         type: GM6020
+#         id: 3
 
-      # 右后舵轮单元
-      - name: DJI6020_4          # 右后转向电机
-        type: GM6020
-        id: 4
+#       # 右后舵轮单元
+#       - name: DJI6020_4          # 右后转向电机
+#         type: GM6020
+#         id: 4
   
-  - device: /dev/ttyACM1
+  - device: /dev/ttyACM0
     baudrate: 921600
     motors:
       - name: DJI3508_1          # 左前驱动电机

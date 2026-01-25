@@ -12,6 +12,9 @@ find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(ament_index_cpp REQUIRED)
@@ -52,6 +55,7 @@ add_library(motor_control_lib
   src/config_parser.cpp
   # 运动学
   src/steer_wheel_kinematics.cpp
+  src/omni_wheel_kinematics.cpp
 )
 
 # 为库添加依赖
@@ -116,12 +120,51 @@ ament_target_dependencies(chassis_control_node
   ament_index_cpp
 )
 
+# C++ 可执行文件 - 全向轮底盘控制节点
+add_executable(omni_chassis_control_node
+  src/omni_chassis_control_node.cpp
+)
+
+# 链接核心库
+target_link_libraries(omni_chassis_control_node
+  motor_control_lib
+)
+
+ament_target_dependencies(omni_chassis_control_node
+  rclcpp
+  std_msgs
+  geometry_msgs
+  nav_msgs
+  tf2
+  tf2_geometry_msgs
+  ament_index_cpp
+)
+
+# C++ 可执行文件 - 手柄控制节点
+add_executable(joystick_control_node
+  src/joystick_control_node.cpp
+)
+
+# 链接消息类型支持
+target_link_libraries(joystick_control_node
+  "${cpp_typesupport_target}"
+)
+
+ament_target_dependencies(joystick_control_node
+  rclcpp
+  std_msgs
+  sensor_msgs
+  geometry_msgs
+)
+
 # 安装目标
 install(TARGETS
   motor_control_lib
   motor_control_node
   motor_monitor_node
   chassis_control_node
+  omni_chassis_control_node
+  joystick_control_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}
