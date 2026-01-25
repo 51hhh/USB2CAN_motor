@@ -1,0 +1,52 @@
+# Xbox 手柄控制参数配置
+
+joystick_control_node:
+  ros__parameters:
+    # 速度限制（应与底盘控制节点一致）
+    max_linear_velocity: 0.5       # 最大线速度 (m/s) - 对应约1000 RPM电机转速
+    max_angular_velocity: 2.0      # 最大角速度 (rad/s)
+    
+    # 摇杆参数
+    deadzone: 0.10                  # 摇杆死区 [0, 1]，避免漂移 - 已降低提高灵敏度
+    speed_curve_exponent: 1.5       # 速度曲线指数，>1 使低速更平滑 - 已降低提高响应
+    
+    # 控制参数
+    publish_rate: 50.0              # 发布频率 (Hz)
+    accel_limit: 3.0                # 线性加速度限制 (m/s²)
+    angular_accel_limit: 5.0        # 角加速度限制 (rad/s²)
+    joy_timeout: 0.5                # 手柄超时时间 (s)
+    
+    # 速度模式增益（可通过按钮切换）
+    speed_mode_slow: 0.5            # 慢速模式：50% 速度（X 键）
+    speed_mode_normal: 0.8          # 正常模式：80% 速度（A 键）
+    speed_mode_fast: 1.0            # 快速模式：100% 速度（Y 键）
+    
+    # Xbox 手柄轴映射（标准 ROS joy 驱动）
+    axis_linear_x: 1                # 左摇杆 Y 轴 → 前进/后退
+    axis_linear_y: 0                # 左摇杆 X 轴 → 左右平移
+    axis_angular: 3                 # 右摇杆 X 轴 → 旋转
+    axis_lt: 2                      # LT 触发器 → 减速
+    axis_rt: 5                      # RT 触发器 → 加速
+    
+    # Xbox 手柄按钮映射
+    button_emergency_stop: 1        # B 键 → 急停
+    button_slow_mode: 2             # X 键 → 慢速模式
+    button_normal_mode: 0           # A 键 → 正常模式
+    button_fast_mode: 3             # Y 键 → 快速模式
+    button_enable: 7                # Start 键 → 启用/禁用控制
+
+# Xbox 手柄按键说明：
+# ┌────────────────────────────────────────────────┐
+# │               Xbox 手柄控制布局                 │
+# ├────────────────────────────────────────────────┤
+# │ 左摇杆：      前进/后退 + 左右平移             │
+# │ 右摇杆：      原地旋转                          │
+# │ LT 触发器：   减速（按住降低速度）              │
+# │ RT 触发器：   加速（按住提高速度）              │
+# │                                                 │
+# │ A 键：        正常模式 (60% 速度)               │
+# │ B 键：        急停                              │
+# │ X 键：        慢速模式 (30% 速度)               │
+# │ Y 键：        快速模式 (100% 速度)              │
+# │ Start 键：    启用/禁用控制（切换开关）         │
+# └────────────────────────────────────────────────┘
