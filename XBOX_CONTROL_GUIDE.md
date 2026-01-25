@@ -54,8 +54,10 @@ joystick_control_node:
     # 死区
     deadzone: 0.1               # 摇杆死区 [0.0-1.0]
     
-    # 平滑滤波
-    filter_alpha: 0.3           # 低通滤波系数，越小越平滑
+    # 平滑与加速度限制（当前实现使用加速度限制与速度曲线）
+    accel_limit: 2.0            # 最大线速度加速度 (m/s^2)
+    angular_accel_limit: 4.0    # 最大角速度加速度 (rad/s^2)
+    speed_curve_exponent: 1.0   # 速度曲线指数，>1 更柔和，加速更平缓
     
     # 超时保护
     joy_timeout: 0.5            # 手柄断连超时 (秒)
