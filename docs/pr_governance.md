@@ -210,6 +210,10 @@ fork PR 与同仓库 PR 的共同点：
 
 建议按下面顺序排查仓库设置（需要仓库管理员权限）：
 
+0. 先确认触发时序
+   - GitHub Actions 设置变更通常**不会追溯修复旧事件**
+   - 如果 PR 在“受限配置”下创建，后续即使改好了设置，也可能仍停留在 pending
+   - 需要重新触发事件：`close/reopen PR` 或向 PR 分支 `push` 一个新 commit（可为空提交）
 1. `Settings -> Actions -> General`
    - 确认仓库允许执行 GitHub Actions workflow
    - 确认 fork PR 场景未被策略直接阻断（例如要求外部贡献者先人工批准才允许运行）
