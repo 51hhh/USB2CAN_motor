@@ -151,8 +151,8 @@ jobs:
             const isWorkflowPermissionError = (error) => {
               const message = formatError(error)
               return (
-                /refusing to allow a github app to create or update workflows?\b/i.test(message) ||
-                /create or update workflows?\b .* without `?\bworkflows\b`? permission/i.test(message)
+                /refusing to allow a github app to create or update \bworkflows?\b/i.test(message) ||
+                /create or update \bworkflows?\b .* without `?\bworkflows?\b`? permission/i.test(message)
               )
             }
 
