@@ -199,6 +199,29 @@ fork PR 与同仓库 PR 的共同点：
 - 自动化合并能力以仓库当前权限配置和 GitHub 平台限制为准
 - 若 PR 修改了 `.github/workflows/*`，启用 auto-merge 还需要 `workflows: write` 权限；否则会在 `PR automation` 中提示需维护者手动启用
 
+### 常见卡点：`PR gate` 一直显示“等待状态报告”，且没有 Run 按钮
+
+出现这个现象时，通常不是 `pr-ci.yml` 逻辑错误，而是 **workflow 根本没有被触发**。  
+典型信号是：
+
+- PR 页面显示 `PR gate` 为 Expected / Pending
+- 对应 commit 的 checks 数量为 0（没有任何 `Semantic PR title` / `ROS build and test` / `PR gate` 运行记录）
+- PR 页面看不到可手动触发的 Run 入口
+
+建议按下面顺序排查仓库设置（需要仓库管理员权限）：
+
+1. `Settings -> Actions -> General`
+   - 确认仓库允许执行 GitHub Actions workflow
+   - 确认 fork PR 场景未被策略直接阻断（例如要求外部贡献者先人工批准才允许运行）
+2. `Settings -> Actions -> General -> Workflow permissions`
+   - 选择 `Read and write permissions`
+   - 开启 `Allow GitHub Actions to create and approve pull requests`
+3. `Settings -> Branches -> Branch protection rules`
+   - required checks 保持与实际会运行的检查一致（建议只要求 `PR gate`）
+   - 规则分支模式必须匹配真实目标分支（`master` / `main`），避免规则误配
+
+如果你是 fork PR 作者而不是目标仓库管理员，通常看不到“批准并运行 workflow”的入口；需要由目标仓库维护者在仓库设置或 PR 页面执行一次批准。
+
 ## PR 模板填写规范
 
 默认自动填充模板应至少完整填写以下内容：
