@@ -4,18 +4,20 @@ DJI 3508 击球控制器
 
 击球流程:
   1. 蓄力: 速度模式顺时针旋转(角度增加方向)到蓄力角度(默认210°), 到位后位置锁定
-  2. 击球: 从蓄力位置开始持续加速逆时针旋转, 转满指定角度(默认540°)后停止
-  3. 停止: 转满指定角度后停止输出
+  2. 击球: 从蓄力位置开始, 直接电流输出驱动逆时针旋转, 转满1.25圈(450°)后停止
+  3. 回零: 逆时针慢速回到0°, 位置锁定
 
 路径示例:
   蓄力: 当前 → ... → 210° (顺时针, 角度增加)
-  击球: 210° → 持续加速逆时针 → 转满540° → 停止
+  击球: 210° → 直接电流驱动逆时针 → 转满450° → 回零
 方向约束: 击球时逆时针(角度减小), 蓄力时顺时针(角度增加)
+GM3508 电流范围: -16384 ~ 16384
 
 用法:
   python3 strike_dji.py
-  python3 strike_dji.py --charge-angle 210 --speed 11000
-  python3 strike_dji.py --speed 8000 --motor DJI3508_1
+  python3 strike_dji.py --charge-angle 210 --current -16384
+  python3 strike_dji.py --current -10000 --motor DJI3508_1 --motor2 DJI3508_2
+  python3 strike_dji.py --rotation 540
 """
 
 import rclpy
@@ -37,11 +39,13 @@ RATE_HZ = 200
 class StrikeDJI:
     def __init__(self, args):
         self.charge_angle = args.charge_angle      # 蓄力角度(度)
-        self.strike_speed = args.speed              # 击球最大速度(RPM, 正值)
+        self.strike_current = args.current          # 击球电流(负值=逆时针)
         self.charge_speed = args.charge_speed      # 蓄力速度(RPM, 正值)
-        self.motor_name = args.motor                # 控制的电机名
+        self.motor_name = args.motor                # 主电机名
+        self.motor2_name = args.motor2              # 副电机名(对称安装, 可选)
         self.charge_threshold = args.charge_threshold  # 蓄力到位阈值(度)
         self.return_speed = args.return_speed    # 回零速度(RPM, 正值)
+        self.rotation = args.rotation            # 加速转角(度)
 
         rclpy.init()
         self.node = rclpy.create_node('strike_dji_controller')
@@ -65,13 +69,28 @@ class StrikeDJI:
         print("\n[STOP] 收到停止信号, 制动...")
         self._stop = True
 
+    def _publish_cmd(self, msg):
+        """发布命令到主电机，如有副电机则同时发布反向命令"""
+        self.pub.publish(msg)
+        if self.motor2_name:
+            msg2 = DJIMotorCommandAdvanced()
+            msg2.joint_name = self.motor2_name
+            msg2.mode = msg.mode
+            if msg.mode == MODE_DIRECT:
+                msg2.direct_output = -msg.direct_output  # 对称安装, 反向电流
+            elif msg.mode == MODE_VELOCITY:
+                msg2.velocity_target = -msg.velocity_target  # 反向速度
+            elif msg.mode == MODE_POSITION:
+                msg2.position_target = msg.position_target  # 位置由 mirror 处理
+            self.pub.publish(msg2)
+
     def send_position(self, angle_deg):
         """发送位置控制命令"""
         msg = DJIMotorCommandAdvanced()
         msg.joint_name = self.motor_name
         msg.mode = MODE_POSITION
         msg.position_target = math.radians(angle_deg)
-        self.pub.publish(msg)
+        self._publish_cmd(msg)
 
     def send_velocity(self, rpm):
         """发送速度控制命令, rpm 为转子侧 RPM"""
@@ -80,15 +99,23 @@ class StrikeDJI:
         msg.mode = MODE_VELOCITY
         # 底层回调会做 rad/s → RPM 转换, 这里需要传 rad/s
         msg.velocity_target = rpm * 2.0 * math.pi / 60.0
-        self.pub.publish(msg)
+        self._publish_cmd(msg)
 
-    def send_stop(self):
-        """发送零速度停止"""
+    def send_direct(self, current):
+        """发送直接电流控制命令, current 范围 -16384~16384"""
         msg = DJIMotorCommandAdvanced()
         msg.joint_name = self.motor_name
-        msg.mode = MODE_VELOCITY
-        msg.velocity_target = 0.0
-        self.pub.publish(msg)
+        msg.mode = MODE_DIRECT
+        msg.direct_output = int(max(-16384, min(16384, current)))
+        self._publish_cmd(msg)
+
+    def send_stop(self):
+        """发送零电流停止"""
+        msg = DJIMotorCommandAdvanced()
+        msg.joint_name = self.motor_name
+        msg.mode = MODE_DIRECT
+        msg.direct_output = 0
+        self._publish_cmd(msg)
 
     def wait_for_state(self, timeout=5.0):
         """等待收到第一次电机状态"""
@@ -123,8 +150,10 @@ class StrikeDJI:
         print(f"=== DJI 击球控制器 ===")
         print(f"  电机: {self.motor_name}")
         print(f"  蓄力角度: {self.charge_angle}°")
-        print(f"  击球速度: {self.strike_speed} RPM")
+        print(f"  击球电流: {self.strike_current}")
         print(f"  加速转角: {self.rotation}°")
+        if self.motor2_name:
+            print(f"  副电机: {self.motor2_name} (对称, 反向电流)")
         print()
 
         # 等待电机状态
@@ -171,10 +200,8 @@ class StrikeDJI:
             self.send_stop()
             return
 
-        # ========== 阶段2: 击球(加速1.25圈) ==========
-        STRIKE_ROTATION = 450.0  # 固定1.25圈
-        strike_rpm = -self.strike_speed
-        print(f"\n[击球] 逆时针加速, 目标速度: {strike_rpm} RPM, 加速{STRIKE_ROTATION}°...")
+        # ========== 阶段2: 击球(直接电流) ==========
+        print(f"\n[击球] 直接电流驱动, 电流: {self.strike_current}, 转{self.rotation}°...")
 
         last_angle = self.current_angle
         total_rotated = 0.0
@@ -189,11 +216,11 @@ class StrikeDJI:
                 total_rotated += delta
             last_angle = self.current_angle
 
-            # 全程发送最大速度命令, 保证持续加速
-            self.send_velocity(strike_rpm)
+            # 全程发送电流命令
+            self.send_direct(self.strike_current)
 
-            if total_rotated >= STRIKE_ROTATION:
-                print(f"[加速完成] 累积转角: {total_rotated:.1f}°, 当前角度: {self.current_angle:.1f}°")
+            if total_rotated >= self.rotation:
+                print(f"[击球完成] 累积转角: {total_rotated:.1f}°, 当前角度: {self.current_angle:.1f}°")
                 break
 
         if self._stop:
@@ -241,18 +268,22 @@ class StrikeDJI:
 
 def main():
     parser = argparse.ArgumentParser(description='DJI 3508 击球控制器')
-    parser.add_argument('--charge-angle', type=float, default=210.0,
+    parser.add_argument('--charge-angle', type=float, default=240.0,
                         help='蓄力角度(度, 默认210)')
-    parser.add_argument('--speed', type=float, default=1000.0,
-                        help='击球最大速度(RPM, 正值, 默认11000)')
+    parser.add_argument('--current', type=int, default=-16384,
+                        help='击球电流(负值=逆时针, 范围-16384~16384, 默认-16384)')
     parser.add_argument('--charge-speed', type=float, default=1000.0,
                         help='蓄力旋转速度(RPM, 正值, 默认1000)')
     parser.add_argument('--motor', type=str, default='DJI3508_1',
                         help='控制的电机名(默认DJI3508_1)')
+    parser.add_argument('--motor2', type=str, default='DJI3508_2',
+                        help='副电机名(对称安装, 自动反向, 默认DJI3508_2, 空=单电机)')
     parser.add_argument('--charge-threshold', type=float, default=5.0,
                         help='蓄力到位阈值(度, 默认5)')
-    parser.add_argument('--return-speed', type=float, default=1000.0,
+    parser.add_argument('--return-speed', type=float, default=3000.0,
                         help='回零速度(RPM, 正值, 默认1000)')
+    parser.add_argument('--rotation', type=float, default=450.0,
+                        help='击球加速转角(度, 默认450=1.25圈)')
     args = parser.parse_args()
 
     controller = StrikeDJI(args)

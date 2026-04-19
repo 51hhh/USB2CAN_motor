@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
-击球控制脚本 —— Enter 触发两阶段击打
+击球控制脚本 —— 手柄 LB 触发两阶段击打
 
 GO-M8010-6 FOC 控制公式:
   τ = torque_ff + kp * (pos_target - pos) + kd * (vel_target - vel)
   三项同时生效，每个电机每个阶段可独立设置全部5个参数
 
 流程：
-  1. 按 Enter → 蓄力位置 (大臂 25°, 小臂 -7°)
-  2. 再按 Enter → 击打 (大臂 110°, 小臂 77°)
+  1. 按 LB → 蓄力位置 (大臂 25°, 小臂 -7°)
+  2. 再按 LB → 击打 (大臂 110°, 小臂 77°)
   3. 循环，Ctrl+C 刹车退出
 
 参数调节：修改 READY_CMD / STRIKE_CMD 字典中的 pos/vel/torque_ff/kp/kd
+
+注意：可与底盘 joystick_control_node 同时运行，LB（button[4]）不冲突。
+  底盘使用: 摇杆(axes 0,1,3) + A/B/X/Y/Start 按钮
 """
 
 import math
@@ -20,7 +23,11 @@ import threading
 
 import rclpy
 from rclpy.node import Node
+from sensor_msgs.msg import Joy
 from motor_control_ros2.msg import UnitreeGO8010Command, UnitreeGO8010State
+
+# 手柄按钮索引（Xbox 标准映射）
+JOY_BUTTON_LB = 4
 
 # ═══════════════════════════════════════════════════════
 # 电机配置
@@ -66,50 +73,52 @@ READY_CMD = {
     },
 }
 
-# ── 击打阶段（加速冲刺）──
-# 关键思路：pos_target 设到击球位置之后（过冲目标），
-# 这样电机经过真正击球点时仍在加速/满速，不会提前减速。
-# 叠加正向 vel 和 torque_ff 进一步加大驱动力。
-OVERSHOOT_DEG = 17.0  # 过冲角度（实际击球位置之外多走多少度）
-
+# ── 击打阶段（速度模式 + 位置监督）──
+# kp=0 关闭位置环，纯速度/力矩驱动，全力加速
+# 位置监督：大臂到达 110° 时记录速度并切换刹停
 STRIKE_CMD = {
-    "main": {  # 大臂 — 目标设到 110°+过冲
-        "pos": math.radians(93.0 + OVERSHOOT_DEG),
-        "vel": 1.0,                 # 正向速度前馈 rad/s，加大驱动力
-        "torque_ff": 0.5,            # 正向力矩前馈 Nm（转子侧）
-        "kp": 0.3,
-        "kd": 0.15,
+    "main": {  # 大臂
+        "pos": 0.0,                  # kp=0 时无效
+        "vel": 9.0,                 # 目标速度 rad/s (≈860°/s)
+        "torque_ff": 0.5,            # 额外加速力矩（重力补偿另算）
+        "kp": 0.0,                   # 无位置环 → 纯速度驱动
+        "kd": 0.15,                  # 速度跟踪阻尼
     },
-    "sub": {   # 小臂 — 目标设到 77°+过冲
-        "pos": math.radians(60.0 + OVERSHOOT_DEG),
-        "vel": 1.0,
+    "sub": {   # 小臂
+        "pos": 0.0,
+        "vel": 6.5,
         "torque_ff": 0.5,
-        "kp": 0.3,
+        "kp": 0.0,
         "kd": 0.15,
     },
 }
 
-# ── 击打后刹停保持 ──
-# 到达实际击球位置后切换到此参数，停在击球位置
+# ── 击打后刹停 ──
+# 到达击球位后: 纯刹车(kp=0), 减速到0即可, 停在哪无所谓
+# 击球位: 大臂90° 小臂60°  硬限位: 大臂110° 小臂77°
 STRIKE_HOLD_CMD = {
     "main": {
-        "pos": math.radians(93.0),  # 真正的击球位置
-        "vel": 0.0,
+        "pos": 0.0,                  # kp=0 所以 pos 无意义
+        "vel": 0.0,                  # 目标速度=0, kd产生制动力
         "torque_ff": 0.0,
-        "kp": 0.3,
-        "kd": 0.3,                   # 加大阻尼快速刹停
+        "kp": 0.0,                   # 不做位置控制
+        "kd": 0.15,                   # 纯阻尼刹车
     },
     "sub": {
-        "pos": math.radians(60.0),
+        "pos": 0.0,
         "vel": 0.0,
         "torque_ff": 0.0,
-        "kp": 0.3,
-        "kd": 0.3,
+        "kp": 0.0,
+        "kd": 0.15,
     },
 }
 
-STRIKE_DURATION = 0.3  # 加速冲刺持续时间 (s)
-HOLD_TIME = 2.0        # 击打后保持 (s)
+STRIKE_TRIGGER = math.radians(90.0)   # 大臂到达击球位后切换刹停
+STRIKE_TIMEOUT = 3.0                  # 击打最大时间保护 (s)
+HOLD_DURATION = 1.0                   # 击打后保持 (s)
+
+# ── 缓慢回蓄力 ──
+RETURN_TIME = 1.5      # 回蓄力位的插值时间 (s)
 
 
 class StrikeNode(Node):
@@ -124,7 +133,30 @@ class StrikeNode(Node):
         self.create_subscription(
             UnitreeGO8010State, "unitree_go8010_states", self._state_cb, 10)
 
-        self.get_logger().info("StrikeNode 就绪")
+        # 手柄 LB 按钮事件
+        self._lb_event = threading.Event()
+        self._lb_prev = 0
+        self.create_subscription(Joy, "/joy", self._joy_cb, 10)
+
+        self.get_logger().info("StrikeNode 就绪 (LB 触发)")
+
+    def _joy_cb(self, msg: Joy):
+        """检测 LB 按钮上升沿（按下瞬间触发一次）"""
+        if len(msg.buttons) > JOY_BUTTON_LB:
+            current = msg.buttons[JOY_BUTTON_LB]
+            if current and not self._lb_prev:
+                self._lb_event.set()
+            self._lb_prev = current
+
+    def wait_lb(self, prompt: str = ""):
+        """阻塞等待 LB 按下，替代 input()"""
+        if prompt:
+            print(prompt)
+        self._lb_event.clear()
+        while rclpy.ok():
+            if self._lb_event.wait(timeout=0.1):
+                return True
+        return False
 
     def _state_cb(self, msg: UnitreeGO8010State):
         with self._state_lock:
@@ -240,7 +272,7 @@ class StrikeNode(Node):
                           sub["torque_ff"], sub["kp"], sub["kd"])
 
     def hold_phase(self, cmd: dict, hold_time: float):
-        """持续发送指令保持位置"""
+        """持续发送指令保持"""
         t0 = time.monotonic()
         while time.monotonic() - t0 < hold_time and rclpy.ok():
             main = cmd["main"]
@@ -251,6 +283,31 @@ class StrikeNode(Node):
             for motor in [MOTOR_L2, MOTOR_R2]:
                 self.send_foc(motor, sub["pos"], sub["vel"],
                               sub["torque_ff"], sub["kp"], sub["kd"])
+            time.sleep(CONTROL_DT)
+
+    def slow_move_to(self, target_main: float, target_sub: float,
+                     move_time: float, label: str,
+                     kp: float = 0.5, kd: float = 0.15):
+        """smoothstep 缓慢插值到目标位置（回蓄力用）"""
+        start_main = (self.get_motor_pos(0) + self.get_motor_pos(2)) / 2.0
+        start_sub = (self.get_motor_pos(1) + self.get_motor_pos(3)) / 2.0
+        self.get_logger().info(
+            f"=== {label} ({move_time:.1f}s) ===  "
+            f"大臂: {math.degrees(start_main):.1f}°→{math.degrees(target_main):.1f}°  "
+            f"小臂: {math.degrees(start_sub):.1f}°→{math.degrees(target_sub):.1f}°")
+        t0 = time.monotonic()
+        while rclpy.ok():
+            elapsed = time.monotonic() - t0
+            t = min(1.0, elapsed / move_time) if move_time > 0 else 1.0
+            frac = t * t * (3.0 - 2.0 * t)  # smoothstep
+            pos_m = start_main + (target_main - start_main) * frac
+            pos_s = start_sub + (target_sub - start_sub) * frac
+            for motor in [MOTOR_L1, MOTOR_R1]:
+                self.send_foc(motor, pos_m, 0.0, 0.0, kp, kd)
+            for motor in [MOTOR_L2, MOTOR_R2]:
+                self.send_foc(motor, pos_s, 0.0, 0.0, kp, kd)
+            if elapsed >= move_time:
+                break
             time.sleep(CONTROL_DT)
 
 
@@ -266,23 +323,39 @@ def run_strike(node: StrikeNode):
     node.print_status("电机已上线")
 
     while rclpy.ok():
-        # ── 蓄力 ─────────────────────────────────
-        input("\n按 Enter → 蓄力 (大臂 25°, 小臂 -7°)...")
-        node.send_phase(READY_CMD, "蓄力")
+        # ── 蓄力（缓慢移动到位）─────────────────
+        node.wait_lb("\n按 LB → 蓄力 (大臂 25°, 小臂 -7°)...")
+        node.slow_move_to(READY_CMD["main"]["pos"], READY_CMD["sub"]["pos"],
+                          RETURN_TIME, "缓慢蓄力",
+                          READY_CMD["main"]["kp"], READY_CMD["main"]["kd"])
+        node.send_phase(READY_CMD, "蓄力保持")
         node.hold_phase(READY_CMD, 0.5)
         node.print_status("蓄力完成")
 
-        # ── 击打（过冲加速 → 刹停）─────────────
-        input("\n按 Enter → 击打! (大臂 93°, 小臂 60°)...")
-        # 阶段1: 过冲目标加速冲刺
+        # ── 击打（速度模式 + 位置监督）────────────
+        node.wait_lb("\n按 LB → 击打!...")
         node.send_phase(STRIKE_CMD, "击打-加速")
-        node.hold_phase(STRIKE_CMD, STRIKE_DURATION)
-        # 阶段2: 切换到实际击球位置刹停保持
-        node.send_phase(STRIKE_HOLD_CMD, "击打-刹停")
-        node.hold_phase(STRIKE_HOLD_CMD, HOLD_TIME)
+        t0 = time.monotonic()
+        while rclpy.ok():
+            elapsed = time.monotonic() - t0
+            main_pos = (node.get_motor_pos(0) + node.get_motor_pos(2)) / 2.0
+            if main_pos >= STRIKE_TRIGGER:
+                main_vel = (node.get_motor_vel(0) + node.get_motor_vel(2)) / 2.0
+                node.get_logger().info(
+                    f"到达击球位: {math.degrees(main_pos):.1f}° "
+                    f"vel={main_vel:.1f} rad/s ({math.degrees(main_vel):.0f}°/s)  "
+                    f"t={elapsed:.3f}s")
+                break
+            if elapsed >= STRIKE_TIMEOUT:
+                node.get_logger().warn(f"击打超时 {STRIKE_TIMEOUT}s")
+                break
+            node.hold_phase(STRIKE_CMD, CONTROL_DT)
+        # 切换刹停保持
+        node.send_phase(STRIKE_HOLD_CMD, "刹停")
+        node.hold_phase(STRIKE_HOLD_CMD, HOLD_DURATION)
         node.print_status("击打完成")
 
-        print("\n── 循环: 再次按 Enter 回到蓄力, Ctrl+C 退出 ──")
+        print("\n── 循环: 再次按 LB 缓慢回蓄力, Ctrl+C 退出 ──")
 
 
 def main():
@@ -296,19 +369,20 @@ def main():
     s = STRIKE_CMD
     print(f"""
 ╔═══════════════════════════════════════════════════════════╗
-║  击球控制脚本                                             ║
+║  击球控制脚本 — 速度模式 + 位置监督                       ║
 ║                                                           ║
 ║  FOC: τ = torque_ff + kp*(pos-cur) + kd*(vel-cur_vel)    ║
 ║  重力补偿自动叠加 ({TAU_INNER}/{TAU_OUTER} Nm)                       ║
 ║                                                           ║
 ║  蓄力: 大臂 {math.degrees(r['main']['pos']):5.1f}°  小臂 {math.degrees(r['sub']['pos']):5.1f}°               ║
-║  击打: 大臂 {math.degrees(s['main']['pos']):5.1f}° 小臂  {math.degrees(s['sub']['pos']):5.1f}° (过冲+{OVERSHOOT_DEG:.0f}°加速)    ║
+║  击打: kp=0 vel={s['main']['vel']:.0f} rad/s τ_ff={s['main']['torque_ff']:.1f}Nm  ║
+║  减速: 大臂≥{math.degrees(STRIKE_TRIGGER):.0f}°(击球位)→纯刹车 kd=0.5      ║
+║  硬限位: 大臂110° 小臂77°(安全余量)                      ║
+║  回蓄力: smoothstep {RETURN_TIME:.1f}s                                ║
 ║                                                           ║
-║  Enter → 蓄力 → Enter → 击打 → 循环                     ║
+║  LB → 蓄力 → LB → 击打 → 循环                       ║
 ║  Ctrl+C 紧急刹车                                         ║
-╠═══════════════════════════════════════════════════════════╣
-║  调参: 修改脚本顶部 READY_CMD / STRIKE_CMD 字典          ║
-║  每项含: pos, vel, torque_ff, kp, kd                     ║
+║  可与底盘手柄同时使用(LB不冲突)                          ║
 ╚═══════════════════════════════════════════════════════════╝
 """)
 

@@ -20,19 +20,19 @@ can_interfaces:
   - name: DJI3508_1
     type: GM3508
     id: 1
-    offset: 31.518877
+    # offset: 31.518877
   - name: DJI3508_2
     type: GM3508
     id: 2
-    direction: -1
-    offset: 37.802063
-    mirror_from: DJI3508_1
-  # - name: DJI3508_3
-  #   type: GM3508
-  #   id: 3
-  # - name: DJI3508_4
-  #   type: GM3508
-  #   id: 4
+    # direction: -1
+    # offset: 37.802063
+    # mirror_from: DJI3508_1
+  - name: DJI3508_3
+    type: GM3508
+    id: 3
+  - name: DJI3508_4
+    type: GM3508
+    id: 4
 serial_interfaces:
 - device: /dev/ttyUSB0
   baudrate: 4000000
@@ -42,7 +42,7 @@ serial_interfaces:
     type: GO8010
     id: 0
     direction: -1
-    offset: -0.125530
+    offset: -0.127317
     gear_ratio: 6.33
     k_pos: 0.01
     k_spd: 0.005
@@ -50,7 +50,7 @@ serial_interfaces:
     type: GO8010
     id: 1
     direction: 1
-    offset: 0.743030
+    offset: 0.850869
     gear_ratio: 6.33
     k_pos: 0.01
     k_spd: 0.005
@@ -62,7 +62,7 @@ serial_interfaces:
     type: GO8010
     id: 2
     direction: 1
-    offset: 0.022446
+    offset: 0.026021
     gear_ratio: 6.33
     k_pos: 0.01
     k_spd: 0.005
@@ -70,7 +70,7 @@ serial_interfaces:
     type: GO8010
     id: 3
     direction: -1
-    offset: -0.577272
+    offset: -0.506723
     gear_ratio: 6.33
     k_pos: 0.01
     k_spd: 0.005
