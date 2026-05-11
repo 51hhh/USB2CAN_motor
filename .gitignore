@@ -1,6 +1,9 @@
 /build
 /log
 /install
+**/build/
+**/log/
+**/install/
 
 /fdilink_ahrs_ROS1
 

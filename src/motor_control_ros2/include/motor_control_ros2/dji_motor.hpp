@@ -168,6 +168,13 @@ public:
     return raw_rpm_;
   }
 
+  /**
+   * @brief 获取实际电流（raw 值）
+   */
+  int16_t getCurrent() const {
+    return raw_current_;
+  }
+
 private:
   uint8_t motor_id_;           // 电机 ID (1-8)
   uint8_t bus_id_;             // CAN 总线 ID

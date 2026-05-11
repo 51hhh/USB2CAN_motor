@@ -1,0 +1,12 @@
+vision_catch_controller_node:
+  ros__parameters:
+    goal_topic: "/auto/goal_pose"
+    odom_topic: "/odom"
+    cmd_vel_topic: "/cmd_vel_remote"
+    goal_frame: "vision_world"
+    control_frequency: 50.0
+    approach_gain: 1.0
+    max_linear_speed: 1.0
+    position_tolerance: 0.05
+    goal_timeout_sec: 1.0
+    odom_timeout_sec: 0.5

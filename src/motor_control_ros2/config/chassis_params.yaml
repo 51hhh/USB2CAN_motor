@@ -9,8 +9,10 @@ chassis_control_node:
     wheel_radius: 0.055   # 轮子半径 (m) - 55mm
     
     # 速度限制
-    max_linear_velocity: 10.0   # 最大线速度 (m/s)
-    max_angular_velocity: 10 # 最大角速度 (rad/s)
+    # 与 remote_control_params.yaml 保持一致，避免上游百分比缩放失真后，
+    # chassis_control_node 仍继续接受不现实的超大线速度命令。
+    max_linear_velocity: 2.7     # 最大线速度 (m/s)
+    max_angular_velocity: 6.0    # 最大角速度 (rad/s)
     
     # 电机映射（对应 motors.yaml 中的名称）
     # 左前舵轮单元

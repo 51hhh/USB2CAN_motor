@@ -168,6 +168,7 @@ add_executable(omni_chassis_control_node
 # 链接核心库（不依赖SDK）
 target_link_libraries(omni_chassis_control_node
   motor_control_lib
+  yaml-cpp
 )
 
 # 设置 RPATH
@@ -210,6 +211,7 @@ add_executable(remote_control_node
 # 链接消息类型支持
 target_link_libraries(remote_control_node
   "${cpp_typesupport_target}"
+  yaml-cpp
 )
 
 ament_target_dependencies(remote_control_node
@@ -217,6 +219,33 @@ ament_target_dependencies(remote_control_node
   std_msgs
   sensor_msgs
   geometry_msgs
+  ament_index_cpp
+)
+
+# C++ 可执行文件 - cmd_vel 源选择节点
+add_executable(cmd_vel_mux_node
+  src/cmd_vel_mux_node.cpp
+)
+
+ament_target_dependencies(cmd_vel_mux_node
+  rclcpp
+  geometry_msgs
+)
+
+# C++ 可执行文件 - 视觉接球目标控制节点
+add_executable(vision_catch_controller_node
+  src/vision_catch_controller_node.cpp
+)
+
+target_link_libraries(vision_catch_controller_node
+  yaml-cpp
+)
+
+ament_target_dependencies(vision_catch_controller_node
+  rclcpp
+  geometry_msgs
+  nav_msgs
+  ament_index_cpp
 )
 
 # C++ 可执行文件 - Delta 机械臂管理器
@@ -283,6 +312,49 @@ set_target_properties(parallel_arm_control_node PROPERTIES
   INSTALL_RPATH "$ORIGIN"
 )
 
+# C++ 可执行文件 - 排球击球管理器
+add_executable(volleyball_strike_manager
+  src/volleyball_strike_manager.cpp
+)
+
+# 链接核心库和消息类型支持
+target_link_libraries(volleyball_strike_manager
+  motor_control_lib
+  "${cpp_typesupport_target}"
+)
+
+ament_target_dependencies(volleyball_strike_manager
+  rclcpp
+  std_msgs
+  geometry_msgs
+  ament_index_cpp
+)
+
+# 设置 RPATH
+set_target_properties(volleyball_strike_manager PROPERTIES
+  INSTALL_RPATH "$ORIGIN"
+)
+
+# C++ 可执行文件 - 风车发球管理器
+add_executable(serve_windmill_manager
+  src/serve_windmill_manager.cpp
+)
+
+target_link_libraries(serve_windmill_manager
+  "${cpp_typesupport_target}"
+  yaml-cpp
+)
+
+ament_target_dependencies(serve_windmill_manager
+  rclcpp
+  std_msgs
+  ament_index_cpp
+)
+
+set_target_properties(serve_windmill_manager PROPERTIES
+  INSTALL_RPATH "$ORIGIN"
+)
+
 # 安装目标
 install(TARGETS
   motor_control_lib
@@ -292,9 +364,13 @@ install(TARGETS
   omni_chassis_control_node
   joystick_control_node
   remote_control_node
+  cmd_vel_mux_node
+  vision_catch_controller_node
   delta_arm_manager
   teach_playback_control_node
   parallel_arm_control_node
+  volleyball_strike_manager
+  serve_windmill_manager
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}

@@ -62,7 +62,7 @@ typedef struct motor_control_ros2__msg__UnitreeGO8010Command
   rosidl_runtime_c__String device;
   uint8_t mode;
   /// 目标值（FOC模式使用）
-  /// 期望位置（度），FOC模式时使用
+  /// 期望位置（弧度），FOC模式时使用
   double position_target;
   /// 期望速度（弧度/秒），FOC模式时使用
   double velocity_target;

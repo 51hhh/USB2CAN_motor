@@ -23,10 +23,25 @@ remote_control_node:
     button_speed_up: 5       # 加速按钮 (RB)
     button_speed_down: 4     # 减速按钮 (LB)
     button_stop: 6           # 紧急停止按钮 (Back)
-    
+    button_serve_trigger: 0  # 发球触发按钮 (A)
+
+    # delta_arm 扳机控制
+    arm_trigger_axis: 5              # RT
+    arm_trigger_threshold: 0.15      # 触发阈值（归一化后）
+    arm_trigger_reset_threshold: 0.05  # 回位阈值（归一化后）
+    arm_min_angle_rad: 0.0
+    arm_max_angle_rad: 1.200
+    arm_protection_press_limit: 3
+    arm_protection_window_sec: 2.0
+
     # 速度限制参数
-    max_linear_velocity: 10.0     # 最大线速度 (m/s)
-    max_angular_velocity: 3.14   # 最大角速度 (rad/s)
+    # M3508 输出轴空载约 482 RPM，55 mm 半径轮的理论线速度约为 2.78 m/s。
+    # 这里保留少量余量，先按 2.7 m/s 作为舵轮直线速度上限，
+    # 这样速度百分比（speed_scale）才会与真实车速对应。
+    max_linear_velocity: 2.7      # 最大线速度 (m/s)
+    # 底盘半径约 sqrt((0.65/2)^2 + (0.62/2)^2) = 0.449 m，
+    # 当轮速上限取 2.7 m/s 时，纯自转等效角速度上限约为 2.7 / 0.449 ≈ 6.0 rad/s。
+    max_angular_velocity: 6.0     # 最大角速度 (rad/s)
     
     # 速度缩放参数
     default_speed_scale: 0.5     # 默认速度缩放因子 (50% 最大速度)
@@ -37,3 +52,7 @@ remote_control_node:
     
     # 发布频率
     publish_frequency: 50.0      # 命令发布频率 (Hz)
+
+    # 话题配置
+    joy_topic: "/joy"
+    cmd_vel_topic: "/cmd_vel_remote"

@@ -300,6 +300,7 @@ private:
   bool parseFrame(CANFrame& frame);
   void buildTxFrame(uint32_t can_id, const uint8_t* data, size_t len);
   bool sendRaw(uint32_t can_id, const uint8_t* data, size_t len);
+  void clearRxBuffer();
 };
 
 /**
