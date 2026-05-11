@@ -32,7 +32,7 @@ module motor_control_ros2 {
 
       @verbatim (language="comment", text=
         "目标值（FOC模式使用）" "\n"
-        "期望位置（度），FOC模式时使用")
+        "期望位置（弧度），FOC模式时使用")
       double position_target;
 
       @verbatim (language="comment", text=

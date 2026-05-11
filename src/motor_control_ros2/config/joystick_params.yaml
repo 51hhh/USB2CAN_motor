@@ -35,6 +35,10 @@ joystick_control_node:
     button_fast_mode: 3             # Y 键 → 快速模式
     button_enable: 7                # Start 键 → 启用/禁用控制
 
+    # 话题配置
+    joy_topic: "/joy"
+    cmd_vel_topic: "/cmd_vel_joy"
+
 # Xbox 手柄按键说明：
 # ┌────────────────────────────────────────────────┐
 # │               Xbox 手柄控制布局                 │

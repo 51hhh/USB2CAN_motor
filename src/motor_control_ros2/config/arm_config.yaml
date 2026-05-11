@@ -20,14 +20,10 @@ initialization:
   landing_kd: 0.05
 
   # 重力补偿前馈力矩（Nm，转子侧）
-  # 正值=向上抵抗重力，用户根据实际负载自行调试
-  # 建议从 0.05 开始逐步增大，直到 READY 状态电机不下沉
-  gravity_compensation_torque: 0.30
+  gravity_compensation_torque: 0.8
 
 # PD 控制参数（EXECUTE 阶段位置控制）
 # 注意：kp/kd 作用于电机转子侧，输出端力矩 = τ_rotor × 减速比 6.33
-# kp=0.35: 0.3rad 误差 → 0.35×0.3×6.33 = 0.66 Nm（足够克服重力）
-# kd=0.10: 阻尼比 kd/kp = 0.286，充分抑制振荡
 pd:
   kp: 0.50
   kd: 0.20
@@ -36,7 +32,11 @@ pd:
 motion_profile:
   # 每帧最大速度增量（rad/s，控制 pos_next = pos_now + clamp(err, ±max_velocity*dt)）
   # 0.8 rad/s：1.20 rad 目标需 1.5s 到达，给电机充足跟踪时间
-  max_velocity: 0.8
+  max_velocity: 10
+  # 最大加速度（rad/s²）：限制 vel_ff 的变化率，消除起步/停车阶跃
+  max_acceleration: 50
+  # 减速段比例增益：距目标 max_velocity/planner_p_gain rad 时开始减速
+  planner_p_gain: 15
 
 # 安全参数
 safety:
@@ -52,21 +52,26 @@ position_tolerance: 0.05
 
 # 自适应规划：当电机实际位置与规划位置差超过此值时暂停规划器
 # 防止规划器跑在电机前面太远
-tracking_error_pause: 0.2
+tracking_error_pause: 3.0
+
 
 # 解耦控制零点（固定 0 rad）：软着陆完成瞬间将当前物理角锁定为零点
 # 后续控制全部采用相对增量，且三电机增量应保持一致
 decoupled_zero_rad: 0.0
 
+# EXECUTE 超时（秒）：进入 EXECUTE 后不管是否到达目标，超时即强制进入 DESCENDING
+top_idle_timeout: 1.0
+
+
 # 电机名称与 ID（对应 motors.yaml 中的 joint_name）
 motors:
-  - name: "arm_motor_1"
+  - name: "arm_delta_motor_1"
     id: 0
     device: "/dev/ttyUSB3"
-  - name: "arm_motor_2"
+  - name: "arm_delta_motor_2"
     id: 0
     device: "/dev/ttyUSB1"
-  - name: "arm_motor_3"
+  - name: "arm_delta_motor_3"
     id: 0
     device: "/dev/ttyUSB2"
 

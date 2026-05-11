@@ -31,11 +31,11 @@ public:
 private:
   // ========== 状态机 ==========
   enum class State {
-    WAIT_FEEDBACK,  // 新增：等待电机首帧反馈，不发任何命令
     INIT,
     SOFT_LANDING,
     READY,
-    EXECUTE
+    EXECUTE,
+    DESCENDING
   };
 
   void controlLoop();
@@ -88,14 +88,18 @@ private:
 
   double target_delta_rad_;                    // EXECUTE 目标增量（相对零点）
   double planned_delta_rad_;                   // 梯形规划增量（相对零点）
+  double current_planned_vel_;                 // 规划器当前速度（限加速度用）
+  double max_acceleration_;                    // 最大加速度 (rad/s²)
+  double planner_p_gain_;                      // 减速段比例增益
 
   rclcpp::Time landing_stable_since_;
   rclcpp::Time init_start_time_;
+  rclcpp::Time execute_start_time_;  // EXECUTE 进入时间，用于超时判定
   bool landing_stability_started_;
   bool ready_published_;
 
   double gravity_compensation_torque_;  // 重力补偿前馈力矩（用户自行调试）
-  int feedback_received_count_;
+  double top_idle_timeout_;             // EXECUTE 超时时间（s），超时强制进入 DESCENDING
 };
 
 #endif  // MOTOR_CONTROL_ROS2__DELTA_ARM_MANAGER_NODE_HPP_

@@ -157,3 +157,53 @@ velocity_pid:
 | `/dji_motor_command_advanced` | DJIMotorCommandAdvanced | 位置/速度/直接控制 |
 | `/damiao_motor_command` | DamiaoMotorCommand | MIT 模式命令 |
 | `/unitree_motor_command` | UnitreeMotorCommand | 力位混合命令 |
+
+## `cmd_vel` 多源切换（手动/自动）
+
+为避免手柄与遥控节点同时写入同一 `/cmd_vel` 造成互相覆盖，当前默认链路已拆分为：
+
+- 手柄节点输出：`/cmd_vel_joy`
+- 遥控节点输出：`/cmd_vel_remote`
+- 复用节点：`cmd_vel_mux_node`
+- 底盘最终输入：`/cmd_vel`
+
+`cmd_vel_mux_node` 支持参数：
+
+| 参数名 | 默认值 | 说明 |
+|------|------|------|
+| `joy_input_topic` | `/cmd_vel_joy` | 手动源输入 |
+| `remote_input_topic` | `/cmd_vel_remote` | 自动源输入 |
+| `output_topic` | `/cmd_vel` | 转发输出 |
+| `active_source` | `remote` | 当前生效源（`joy` 或 `remote`） |
+| `source_timeout_sec` | `0.5` | 活动源超时阈值（秒）；`<=0` 表示关闭超时保护 |
+| `timeout_mode` | `brake` | 超时策略：`brake`（刹停）或 `fallback`（回退到备用源） |
+| `fallback_source` | `joy` | `timeout_mode=fallback` 时的回退目标源 |
+| `lock_active_source` | `false` | `true` 时禁止运行时切换控制源（自动模式锁定） |
+
+### 运行时切换
+
+`active_source` 支持运行时动态修改：
+
+- `active_source = remote`：使用自动控制输入
+- `active_source = joy`：切换到手动控制输入
+
+非法值会被拒绝（仅允许 `joy` / `remote`）。切源时若目标源已有新鲜命令，会立即转发缓存命令。
+
+当 `lock_active_source=true` 时，运行时切源请求会被拒绝（用于自动控制锁定）。
+
+### 源超时保护
+
+当当前活动源在 `source_timeout_sec` 内无新命令时：
+
+- `timeout_mode=brake`：发布零速度（刹停保护）
+- `timeout_mode=fallback`：若 `fallback_source` 有新鲜命令，则自动切源并继续控制；否则刹停
+
+自动控制锁定建议配置：`config/cmd_vel_mux_auto_params.yaml`。
+
+### 联调检查项
+
+1. 确认 `/cmd_vel_joy` 与 `/cmd_vel_remote` 均有数据；
+2. 确认 `cmd_vel_mux_node` 的 `active_source` 与期望一致；
+3. 观察 `/cmd_vel` 仅跟随当前活动源变化；
+4. 人为暂停活动源输入，确认超时后按策略执行（刹停或回退）；
+5. 切换源或回退时，`cmd_vel_mux_node` 日志应出现提示。

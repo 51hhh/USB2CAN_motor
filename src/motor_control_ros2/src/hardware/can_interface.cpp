@@ -7,6 +7,47 @@
 #include <chrono>
 #include <sys/select.h>
 
+namespace {
+
+speed_t getBaudrateConstant(int baudrate) {
+  switch (baudrate) {
+    case 9600: return B9600;
+    case 19200: return B19200;
+    case 38400: return B38400;
+    case 57600: return B57600;
+    case 115200: return B115200;
+    case 230400: return B230400;
+    case 460800: return B460800;
+    case 500000: return B500000;
+    case 576000: return B576000;
+    case 921600: return B921600;
+    case 1000000: return B1000000;
+    case 1152000: return B1152000;
+    case 1500000: return B1500000;
+    case 2000000: return B2000000;
+    case 2500000: return B2500000;
+    case 3000000: return B3000000;
+    case 3500000: return B3500000;
+    case 4000000: return B4000000;
+    default: return B921600;
+  }
+}
+
+bool isExpectedResponseId(uint32_t request_id, uint32_t response_id) {
+  switch (request_id) {
+    case 0x200:
+      return response_id >= 0x201 && response_id <= 0x204;
+    case 0x1FF:
+      return response_id >= 0x205 && response_id <= 0x208;
+    case 0x2FF:
+      return response_id >= 0x209 && response_id <= 0x20B;
+    default:
+      return response_id == request_id;
+  }
+}
+
+}  // namespace
+
 namespace motor_control {
 namespace hardware {
 
@@ -52,7 +93,7 @@ bool CANInterface::open(bool silent) {
   }
   
   // 设置波特率
-  speed_t speed = B921600;  // 默认 921600
+  speed_t speed = getBaudrateConstant(baudrate_);
   cfsetospeed(&tty, speed);
   cfsetispeed(&tty, speed);
   
@@ -96,6 +137,11 @@ void CANInterface::close() {
     ::close(fd_);
     fd_ = -1;
   }
+}
+
+void CANInterface::clearRxBuffer() {
+  std::lock_guard<std::mutex> lock(rx_accumulator_mutex_);
+  rx_accumulator_.clear();
 }
 
 void CANInterface::buildTxFrame(uint32_t can_id, const uint8_t* data, size_t len) {
@@ -285,8 +331,10 @@ bool CANInterface::parseFrame(CANFrame& frame) {
   return false;
 }
 
-bool CANInterface::sendRecv(uint32_t can_id, const uint8_t* data, size_t len, 
+bool CANInterface::sendRecv(uint32_t can_id, const uint8_t* data, size_t len,
                             CANFrame& response, int timeout_us) {
+  clearRxBuffer();
+
   if (!sendRaw(can_id, data, len)) {
     return false;
   }
@@ -304,10 +352,9 @@ bool CANInterface::sendRecv(uint32_t can_id, const uint8_t* data, size_t len,
     
     // 尝试解析帧
     if (parseFrame(response)) {
-      // 检查是否是期望的反馈（根据 CAN ID 匹配）
-      // DJI 电机：发送 ID 0x200/0x1FF/0x2FF，反馈 ID 0x201-0x208/0x205-0x20B
-      // 这里简化处理：接收到任何帧都认为是反馈
-      return true;
+      if (isExpectedResponseId(can_id, response.can_id)) {
+        return true;
+      }
     }
   }
   

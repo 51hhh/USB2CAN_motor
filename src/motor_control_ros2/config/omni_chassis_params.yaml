@@ -8,7 +8,7 @@ omni_chassis_control_node:
     # 底盘机械参数
     wheel_base_x: 0.88              # 前后轮距 (m)
     wheel_base_y: 0.88              # 左右轮距 (m)
-    wheel_radius: 0.075            # 轮子半径 (m)
+    wheel_radius: 0.1062            # 轮子半径 (m) 根据2026-03测量校准(原0.075为6寸, 实车为8寸)
     install_angle: 45.0             # 轮子安装角度 (度)，X 形布置为 45°
     
     # 速度限制
@@ -23,6 +23,14 @@ omni_chassis_control_node:
     fr_motor: "DJI3508_2"           # 右前电机
     rl_motor: "DJI3508_3"           # 左后电机
     rr_motor: "DJI3508_4"           # 右后电机
+
+    # 驱动方向（按当前实物测试，全向轮四驱保持同向）
+    fl_drive_direction: 1
+    fr_drive_direction: 1
+    rl_drive_direction: 1
+    rr_drive_direction: 1
+
+    # 注: /odom 已迁移到 positioning_bridge (码盘 + 融合); 本节点固定发 /odom_wheels (twist 高质量) 供融合预测使用
 
 # 配置说明:
 # 1. wheel_base_x: 从底盘中心到前轮（或后轮）的距离 * 2

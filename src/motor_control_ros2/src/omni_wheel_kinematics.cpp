@@ -94,11 +94,12 @@ void OmniWheelKinematics::forwardKinematics(
     double cos_rr = std::cos(angle_rr);
     double sin_rr = std::sin(angle_rr);
     
-    // vx 分量：从各轮子的 x 方向投影求平均
-    vx = (v1 * cos_fl + v2 * cos_fr + v3 * cos_rl + v4 * cos_rr) / 4.0;
+    // vx 分量：雅可比伪逆系数为 1/2（不是 1/4）
+    // 推导：J*J^T 对称 X 型 4 轮配置结果为 diag(2,2)，逆为 diag(1/2,1/2)
+    vx = (v1 * cos_fl + v2 * cos_fr + v3 * cos_rl + v4 * cos_rr) / 2.0;
     
-    // vy 分量：从各轮子的 y 方向投影求平均
-    vy = (v1 * sin_fl + v2 * sin_fr + v3 * sin_rl + v4 * sin_rr) / 4.0;
+    // vy 分量：同上
+    vy = (v1 * sin_fl + v2 * sin_fr + v3 * sin_rl + v4 * sin_rr) / 2.0;
     
     // wz 角速度：从所有轮子的贡献求平均
     wz = (v1 + v2 + v3 + v4) / (4.0 * chassis_radius_);

@@ -94,20 +94,7 @@ void DJIMotor::updateFeedback(const std::string& interface_name, uint32_t can_id
   torque_ = raw_current_;
   temperature_ = static_cast<float>(raw_temp_);
   
-  // 调试日志（仅在首次上线或定期输出）
-  static int feedback_count = 0;
-  if (feedback_count++ % 100 == 0) {  // 每100次输出一次
-    std::cout << "[DJI " << joint_name_ << "] "
-              << "Angle=" << std::fixed << std::setprecision(1) << getAngleDegrees() << "° "
-              << "RPM=" << raw_rpm_;
-    
-    if (!encoder_on_output_) {
-      // GM3508: 显示累积圈数
-      std::cout << " Rounds=" << encoder_rounds_;
-    }
-    
-    std::cout << " Temp=" << static_cast<int>(raw_temp_) << "°C" << std::endl;
-  }
+  // 保持反馈解析热路径简洁，避免在此输出周期性 stdout 日志
 }
 
 void DJIMotor::getControlFrame(uint32_t& can_id, uint8_t* data, size_t& len) {

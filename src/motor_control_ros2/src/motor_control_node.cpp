@@ -278,10 +278,7 @@ private:
       "damiao_motor_states", 10
     );
 
-    // 宇树电机状态发布者
-    unitree_state_pub_ = this->create_publisher<motor_control_ros2::msg::UnitreeMotorState>(
-      "unitree_motor_states", 10
-    );
+    // 宇树电机状态发布者（原生 GO8010 路径）
     unitree_go_state_pub_ = this->create_publisher<motor_control_ros2::msg::UnitreeGO8010State>(
       "unitree_go8010_states", 10
     );
@@ -403,8 +400,8 @@ private:
    * @brief 串口通信线程函数（每个串口接口一个线程，并行收发）
    *
    * 架构改进：从主控制循环中解耦串口 I/O
-   * - 旧架构：controlLoop → writeUnitreeNativeMotors（阻塞 15-48ms）→ 主循环降至 20-60Hz
-   * - 新架构：独立线程并行轮询，主循环恢复 200Hz，串口每路 ~200Hz
+   * 旧架构：controlLoop → writeUnitreeNativeMotors（阻塞 15-48ms）→ 主循环降至 20-60Hz
+   * 新架构：独立线程并行轮询，主循环恢复 200Hz，串口每路 ~200Hz
    *
    * 分层不变：
    * 1. 协议层（UnitreeMotorNative）：构建命令包 / 解析反馈包（mutex 保护）
@@ -440,9 +437,10 @@ private:
         auto& pcnt = poll_cnt[motor->getJointName()];
         pcnt++;
         if (pcnt % 200 == 1) {
-          fprintf(stderr, "[DIAG-T] %s poll#%d iface=%s isOpen=%d\n",
-                  motor->getJointName().c_str(), pcnt,
-                  iface_name.c_str(), serial->isOpen() ? 1 : 0);
+          RCLCPP_DEBUG_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                               "[Serial Thread] %s poll#%d iface=%s isOpen=%d",
+                               motor->getJointName().c_str(), pcnt,
+                               iface_name.c_str(), serial->isOpen() ? 1 : 0);
         }
 
         // 协议层：构建命令包
@@ -453,10 +451,10 @@ private:
         ssize_t last_n = 0;
 
         // 发送接收 + 帧扫描解析
-        // wait_ms=4: USB适配器往返需要~3-4ms，实测4ms→0%失败
-        // timeout_ms=8: 缩短超时（原12ms），数据在wait后几乎立即到达
+        constexpr int kSerialWaitMs = 2;
+        constexpr int kSerialTimeoutMs = 8;
         auto try_recv_parse = [&](uint8_t (&buf)[BUF_SIZE]) -> bool {
-          ssize_t n = serial->sendRecvAccumulate(cmd, 17, buf, BUF_SIZE, 4, 8);
+          ssize_t n = serial->sendRecvAccumulate(cmd, 17, buf, FRAME_LEN, kSerialWaitMs, kSerialTimeoutMs);
           last_n = n;
           if (n <= 0) return false;
           for (ssize_t off = 0; off + static_cast<ssize_t>(FRAME_LEN) <= n; ++off) {
@@ -477,12 +475,15 @@ private:
         dcnt++;
         if (!ok) fails++;
         if (dcnt % 200 == 0) {
-          fprintf(stderr, "[DIAG-T] %s: poll#%d ok=%d last_n=%zd fails=%d head=[",
-                  motor->getJointName().c_str(), dcnt, ok ? 1 : 0, last_n, fails);
-          for (ssize_t i = 0; i < std::min(last_n, (ssize_t)8); ++i) {
-            fprintf(stderr, "%02X ", response[i]);
+          std::ostringstream head_stream;
+          for (ssize_t i = 0; i < std::min(last_n, static_cast<ssize_t>(8)); ++i) {
+            head_stream << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
+                        << static_cast<int>(response[i]) << ' ';
           }
-          fprintf(stderr, "]\n");
+          RCLCPP_DEBUG_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                               "[Serial Thread] %s poll#%d ok=%d last_n=%zd fails=%d head=[%s]",
+                               motor->getJointName().c_str(), dcnt, ok ? 1 : 0, last_n, fails,
+                               head_stream.str().c_str());
         }
 
         if (!ok) {
@@ -674,6 +675,8 @@ private:
       msg.model = (motor->getMotorType() == MotorType::DJI_GM6020) ? "GM6020" : "GM3508";
       msg.online = motor->isOnline();
       msg.angle = motor->getOutputPosition() * 180.0 / M_PI;
+      msg.rpm = motor->getRPM();
+      msg.current = motor->getCurrent();
       msg.temperature = static_cast<uint8_t>(motor->getTemperature());
       msg.control_frequency = actual_control_freq_;  // 添加控制频率
       dji_state_pub_->publish(msg);
@@ -755,7 +758,7 @@ private:
   }
   
   void unitreeCommandCallback(const motor_control_ros2::msg::UnitreeMotorCommand::SharedPtr /*msg*/) {
-    // SDK版本已禁用，使用 unitreeGOCommand 和原生协议版本
+    // 兼容旧监控/上层节点：当前控制路径已统一到 GO8010 原生协议
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
                          "[CMD] UnitreeMotorCommand 已禁用，请使用 UnitreeGO8010Command");
   }
@@ -1014,7 +1017,6 @@ private:
   
   rclcpp::Publisher<motor_control_ros2::msg::DJIMotorState>::SharedPtr dji_state_pub_;
   rclcpp::Publisher<motor_control_ros2::msg::DamiaoMotorState>::SharedPtr damiao_state_pub_;
-  rclcpp::Publisher<motor_control_ros2::msg::UnitreeMotorState>::SharedPtr unitree_state_pub_;
   rclcpp::Publisher<motor_control_ros2::msg::UnitreeGO8010State>::SharedPtr unitree_go_state_pub_;
   rclcpp::Publisher<motor_control_ros2::msg::ControlFrequency>::SharedPtr control_freq_pub_;
   

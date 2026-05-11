@@ -10,6 +10,7 @@
 #include "motor_control_ros2/msg/dji_motor_command_advanced.hpp"
 #include "motor_control_ros2/msg/dji_motor_state.hpp"
 
+#include <algorithm>
 #include <map>
 #include <string>
 #include <memory>
@@ -108,9 +109,20 @@ private:
     
     // 底盘速度命令回调
     void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
+        // 对平移速度做矢量限幅，避免 x/y 分量分别限幅后，
+        // 斜向合速度超过 max_linear_velocity_。
+        double limited_vx = msg->linear.x;
+        double limited_vy = msg->linear.y;
+        const double linear_speed = std::hypot(limited_vx, limited_vy);
+        if (linear_speed > max_linear_velocity_ && linear_speed > 1e-9) {
+            const double scale = max_linear_velocity_ / linear_speed;
+            limited_vx *= scale;
+            limited_vy *= scale;
+        }
+
         // 限制速度
-        cmd_vx_ = std::clamp(msg->linear.x, -max_linear_velocity_, max_linear_velocity_);
-        cmd_vy_ = std::clamp(msg->linear.y, -max_linear_velocity_, max_linear_velocity_);
+        cmd_vx_ = limited_vx;
+        cmd_vy_ = limited_vy;
         cmd_wz_ = std::clamp(msg->angular.z, -max_angular_velocity_, max_angular_velocity_);
         
         last_cmd_time_ = this->now();
@@ -161,6 +173,22 @@ private:
                 cmd_vx_, cmd_vy_, cmd_wz_,
                 fl_cmd, fr_cmd, rl_cmd, rr_cmd
             );
+
+            // 对组合运动做轮速统一缩放，确保任一轮子的目标线速度
+            // 都不会超过底盘允许的最大轮速能力。
+            const double max_wheel_speed = std::max({
+                std::abs(fl_cmd.velocity),
+                std::abs(fr_cmd.velocity),
+                std::abs(rl_cmd.velocity),
+                std::abs(rr_cmd.velocity)
+            });
+            if (max_wheel_speed > max_linear_velocity_ && max_wheel_speed > 1e-9) {
+                const double scale = max_linear_velocity_ / max_wheel_speed;
+                fl_cmd.velocity *= scale;
+                fr_cmd.velocity *= scale;
+                rl_cmd.velocity *= scale;
+                rr_cmd.velocity *= scale;
+            }
         
             // 舵角优化（最短路径）
             // 坐标转换说明：
