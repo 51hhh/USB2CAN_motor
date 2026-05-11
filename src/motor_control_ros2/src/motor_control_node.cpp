@@ -499,7 +499,7 @@ private:
         // wait_ms=4: USB适配器往返需要~3-4ms，实测4ms→0%失败
         // timeout_ms=8: 缩短超时（原12ms），数据在wait后几乎立即到达
         auto try_recv_parse = [&](uint8_t (&buf)[BUF_SIZE]) -> bool {
-          ssize_t n = serial->sendRecvAccumulate(cmd, 17, buf, BUF_SIZE, 4, 8);
+          ssize_t n = serial->sendRecvAccumulate(cmd, 17, buf, BUF_SIZE, 4, 15);
           last_n = n;
           if (n <= 0) return false;
           for (ssize_t off = 0; off + static_cast<ssize_t>(FRAME_LEN) <= n; ++off) {

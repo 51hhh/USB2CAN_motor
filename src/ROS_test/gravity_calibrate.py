@@ -38,8 +38,8 @@ RATE_HZ = 100
 NODE_TIMEOUT = 8.0
 
 # 机械限位 (度)
-INNER_LIMIT_DEG = 110.0   # 大臂限位
-OUTER_LIMIT_DEG = 999.0   # 小臂限位 (暂时禁用)
+INNER_LIMIT_DEG = 999.0  # 大臂限位
+OUTER_LIMIT_DEG = 999.0  # 小臂限位 (暂时禁用)
 LIMIT_MARGIN_DEG = 5.0    # 接近限位提前中止的余量
 
 
