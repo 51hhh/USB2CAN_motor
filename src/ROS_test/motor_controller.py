@@ -20,7 +20,7 @@ class MotorController:
         self.enabled = True
         
         # 默认速度环参数
-        if speed_pid_params is None:一个
+        if speed_pid_params is None:
             speed_pid_params = {
                 'kp': 30.0, 'ki': 1.0, 'kd': 0.0,
                 'i_max': 300, 'out_max': 10000, 'dead_zone': 5
