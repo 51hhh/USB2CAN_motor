@@ -1,8 +1,11 @@
 #include <rclcpp/rclcpp.hpp>
+#include <ament_index_cpp/get_package_share_directory.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+
+#include <yaml-cpp/yaml.h>
 
 #include "motor_control_ros2/omni_wheel_kinematics.hpp"
 #include "motor_control_ros2/msg/dji_motor_command_advanced.hpp"
@@ -29,54 +32,51 @@ namespace motor_control {
 class OmniChassisControlNode : public rclcpp::Node {
 public:
     OmniChassisControlNode() : Node("omni_chassis_control_node") {
-        // 声明参数
-        this->declare_parameter("control_frequency", 100.0);
-        this->declare_parameter("wheel_base_x", 0.50);  // 前后轮距 (m)
-        this->declare_parameter("wheel_base_y", 0.50);  // 左右轮距 (m)
-        this->declare_parameter("wheel_radius", 0.076); // 轮子半径 (m)
-        this->declare_parameter("install_angle", 45.0); // 安装角度 (度)
-        this->declare_parameter("max_linear_velocity", 2.0);
-        this->declare_parameter("max_angular_velocity", 3.14);
-        this->declare_parameter("cmd_timeout", 0.5);    // 命令超时 (s)
-        this->declare_parameter("velocity_filter_alpha", 0.3);  // 速度滤波系数
-        
-        // 电机映射参数 (4 个 GM3508)
-        this->declare_parameter("fl_motor", "DJI3508_1");  // 左前
-        this->declare_parameter("fr_motor", "DJI3508_2");  // 右前
-        this->declare_parameter("rl_motor", "DJI3508_3");  // 左后
-        this->declare_parameter("rr_motor", "DJI3508_4");  // 右后
-        
-        // 读取参数
-        control_frequency_ = this->get_parameter("control_frequency").as_double();
-        double wheel_base_x = this->get_parameter("wheel_base_x").as_double();
-        double wheel_base_y = this->get_parameter("wheel_base_y").as_double();
-        double wheel_radius = this->get_parameter("wheel_radius").as_double();
-        double install_angle = this->get_parameter("install_angle").as_double();
-        max_linear_velocity_ = this->get_parameter("max_linear_velocity").as_double();
-        max_angular_velocity_ = this->get_parameter("max_angular_velocity").as_double();
-        cmd_timeout_ = this->get_parameter("cmd_timeout").as_double();
-        velocity_filter_alpha_ = this->get_parameter("velocity_filter_alpha").as_double();
-        
-        // 读取电机映射
-        motor_names_[0] = this->get_parameter("fl_motor").as_string();  // FL
-        motor_names_[1] = this->get_parameter("fr_motor").as_string();  // FR
-        motor_names_[2] = this->get_parameter("rl_motor").as_string();  // RL
-        motor_names_[3] = this->get_parameter("rr_motor").as_string();  // RR
+        this->declare_parameter("config_file", "");
+
+        const std::string config_file = resolveConfigFile();
+        try {
+            loadParams(config_file);
+        } catch (const std::exception & e) {
+            RCLCPP_ERROR(this->get_logger(), "omni_chassis_control_node 配置加载失败: %s", e.what());
+            RCLCPP_ERROR(this->get_logger(), "配置文件路径: %s", config_file.c_str());
+            throw;
+        }
+
+        if (control_frequency_ <= 0.0) {
+            RCLCPP_WARN(this->get_logger(), "control_frequency=%.3f 非法，回退到 100.0", control_frequency_);
+            control_frequency_ = 100.0;
+        }
+        if (wheel_radius_ <= 0.0) {
+            RCLCPP_WARN(this->get_logger(), "wheel_radius=%.3f 非法，回退到 0.1062", wheel_radius_);
+            wheel_radius_ = 0.1062;
+        }
+        if (cmd_timeout_ <= 0.0) {
+            RCLCPP_WARN(this->get_logger(), "cmd_timeout=%.3f 非法，回退到 0.5", cmd_timeout_);
+            cmd_timeout_ = 0.5;
+        }
+        if (velocity_filter_alpha_ < 0.0 || velocity_filter_alpha_ > 1.0) {
+            RCLCPP_WARN(this->get_logger(), "velocity_filter_alpha=%.3f 非法，回退到 0.3", velocity_filter_alpha_);
+            velocity_filter_alpha_ = 0.3;
+        }
         
         // 初始化运动学
         kinematics_ = std::make_unique<OmniWheelKinematics>(
-            wheel_base_x, wheel_base_y, wheel_radius, install_angle
+            wheel_base_x_, wheel_base_y_, wheel_radius_, install_angle_
         );
         
         RCLCPP_INFO(this->get_logger(), 
             "X 形全向轮底盘控制节点启动");
         RCLCPP_INFO(this->get_logger(),
             "轮距: %.3fm x %.3fm, 轮半径: %.3fm, 安装角: %.1f°",
-            wheel_base_x, wheel_base_y, wheel_radius, install_angle);
+            wheel_base_x_, wheel_base_y_, wheel_radius_, install_angle_);
         RCLCPP_INFO(this->get_logger(),
             "电机映射: FL=%s, FR=%s, RL=%s, RR=%s",
             motor_names_[0].c_str(), motor_names_[1].c_str(),
             motor_names_[2].c_str(), motor_names_[3].c_str());
+        RCLCPP_INFO(this->get_logger(),
+            "驱动方向: FL=%d, FR=%d, RL=%d, RR=%d",
+            drive_directions_[0], drive_directions_[1], drive_directions_[2], drive_directions_[3]);
         
         // 创建订阅者
         cmd_vel_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
@@ -95,8 +95,9 @@ public:
         );
         
         odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>(
-            "/odom", 10
+            "/odom_wheels", 10
         );
+        RCLCPP_INFO(this->get_logger(), "发布轮速里程计到 /odom_wheels (供 positioning_bridge 融合)");
         
         // 创建控制循环定时器
         auto period = std::chrono::duration<double>(1.0 / control_frequency_);
@@ -117,6 +118,66 @@ public:
     }
 
 private:
+    std::string resolveConfigFile() {
+        std::string config_file = this->get_parameter("config_file").as_string();
+        if (!config_file.empty()) {
+            return config_file;
+        }
+
+        return ament_index_cpp::get_package_share_directory("motor_control_ros2") +
+            "/config/omni_chassis_params.yaml";
+    }
+
+    void loadParams(const std::string & config_file) {
+        RCLCPP_INFO(this->get_logger(), "正在加载全向轮底盘参数: %s", config_file.c_str());
+
+        YAML::Node root = YAML::LoadFile(config_file);
+        YAML::Node params = root;
+        if (root["omni_chassis_control_node"] && root["omni_chassis_control_node"]["ros__parameters"]) {
+            params = root["omni_chassis_control_node"]["ros__parameters"];
+        }
+
+        auto loadString = [&params](const char * key, std::string & value) {
+            if (params[key]) {
+                value = params[key].as<std::string>();
+            }
+        };
+
+        auto loadDouble = [&params](const char * key, double & value) {
+            if (params[key]) {
+                value = params[key].as<double>();
+            }
+        };
+
+        auto loadInt = [&params](const char * key, int & value) {
+            if (params[key]) {
+                value = params[key].as<int>();
+            }
+        };
+
+        loadDouble("control_frequency", control_frequency_);
+        loadDouble("wheel_base_x", wheel_base_x_);
+        loadDouble("wheel_base_y", wheel_base_y_);
+        loadDouble("wheel_radius", wheel_radius_);
+        loadDouble("install_angle", install_angle_);
+        loadDouble("max_linear_velocity", max_linear_velocity_);
+        loadDouble("max_angular_velocity", max_angular_velocity_);
+        loadDouble("cmd_timeout", cmd_timeout_);
+        loadDouble("velocity_filter_alpha", velocity_filter_alpha_);
+
+        loadString("fl_motor", motor_names_[0]);
+        loadString("fr_motor", motor_names_[1]);
+        loadString("rl_motor", motor_names_[2]);
+        loadString("rr_motor", motor_names_[3]);
+
+        loadInt("fl_drive_direction", drive_directions_[0]);
+        loadInt("fr_drive_direction", drive_directions_[1]);
+        loadInt("rl_drive_direction", drive_directions_[2]);
+        loadInt("rr_drive_direction", drive_directions_[3]);
+
+        RCLCPP_INFO(this->get_logger(), "omni_chassis_control_node 参数加载完成: %s", config_file.c_str());
+    }
+
     // 底盘速度命令回调
     void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
         // 限制速度
@@ -180,17 +241,13 @@ private:
             // 将轮子线速度转换为电机角速度 (rad/s)
             double wheel_angular_vel = wheel_velocities[i] / kinematics_->getWheelRadius();
             // 考虑减速比转换为电机角速度
-            double motor_angular_vel = wheel_angular_vel * 19.0;  // GM3508 减速比 19:1
-            
-            // 转换为 RPM（电机驱动期望的单位）
-            // 1 rad/s = 60/(2*π) RPM ≈ 9.5493 RPM
-            double motor_rpm = motor_angular_vel * 60.0 / (2.0 * M_PI);
+            double motor_angular_vel = wheel_angular_vel * 19.0 * static_cast<double>(drive_directions_[i]);  // GM3508 减速比 19:1
             
             auto msg = motor_control_ros2::msg::DJIMotorCommandAdvanced();
             msg.header.stamp = timestamp;
             msg.joint_name = motor_names_[i];
             msg.mode = motor_control_ros2::msg::DJIMotorCommandAdvanced::MODE_VELOCITY;
-            msg.velocity_target = motor_rpm;  // RPM（正确单位）
+            msg.velocity_target = motor_angular_vel;  // 弧度/秒（消息定义要求的单位）
             
             motor_cmd_pub_->publish(msg);
         }
@@ -211,7 +268,8 @@ private:
                 const auto& state = motor_states_[motor_names_[i]];
                 if (state.online) {
                     // RPM → 线速度
-                    wheel_velocities[i] = kinematics_->rpmToVelocity(state.rpm);
+                    wheel_velocities[i] = kinematics_->rpmToVelocity(
+                        static_cast<double>(state.rpm) * static_cast<double>(drive_directions_[i]));
                 } else {
                     all_motors_online = false;
                 }
@@ -221,8 +279,12 @@ private:
         }
         
         // 正运动学：轮子速度 → 底盘速度
-        double vx, vy, wz;
-        kinematics_->forwardKinematics(wheel_velocities, vx, vy, wz);
+        // 注意：运动学输出坐标系仍然是 X向右，Y向前；这里要转换回 ROS 标准坐标系
+        // 运动学系 -> ROS 系：ros_vx = kin_vy, ros_vy = -kin_vx
+        double kin_vx, kin_vy, wz;
+        kinematics_->forwardKinematics(wheel_velocities, kin_vx, kin_vy, wz);
+        const double vx = kin_vy;
+        const double vy = -kin_vx;
         
         // 更新里程计（在全局坐标系中积分）
         double delta_x = (vx * cos(odom_theta_) - vy * sin(odom_theta_)) * dt;
@@ -287,16 +349,21 @@ private:
     
     // 成员变量
     std::unique_ptr<OmniWheelKinematics> kinematics_;
-    std::array<std::string, 4> motor_names_;  // [FL, FR, RL, RR]
+    std::array<std::string, 4> motor_names_ {{"DJI3508_1", "DJI3508_2", "DJI3508_3", "DJI3508_4"}};  // [FL, FR, RL, RR]
+    std::array<int, 4> drive_directions_ {{1, 1, 1, 1}};  // [FL, FR, RL, RR]
     
     // 参数
-    double control_frequency_;
-    double max_linear_velocity_;
-    double max_angular_velocity_;
-    double cmd_timeout_;
+    double control_frequency_ {100.0};
+    double wheel_base_x_ {0.50};
+    double wheel_base_y_ {0.50};
+    double wheel_radius_ {0.1062};
+    double install_angle_ {45.0};
+    double max_linear_velocity_ {2.0};
+    double max_angular_velocity_ {3.14};
+    double cmd_timeout_ {0.5};
     
     // 速度平滑滤波参数
-    double velocity_filter_alpha_;  // 低通滤波系数 [0, 1]，越小越平滑
+    double velocity_filter_alpha_ {0.3};  // 低通滤波系数 [0, 1]，越小越平滑
     
     // 上一次的滤波速度（用于低通滤波）
     double filtered_vx_ = 0.0;

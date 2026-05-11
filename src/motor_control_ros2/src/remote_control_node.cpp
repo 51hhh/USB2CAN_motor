@@ -25,7 +25,7 @@ RemoteControlNode::RemoteControlNode() : Node("remote_control_node") {
 
     // 创建订阅者
     joy_sub_ = this->create_subscription<sensor_msgs::msg::Joy>(
-        "/joy", 10,
+        config_.joy_topic, 10,
         std::bind(&RemoteControlNode::joyCallback, this, std::placeholders::_1)
     );
     arm_ready_sub_ = this->create_subscription<std_msgs::msg::String>(
@@ -35,10 +35,13 @@ RemoteControlNode::RemoteControlNode() : Node("remote_control_node") {
 
     // 创建发布者
     cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>(
-        "/cmd_vel", 10
+        config_.cmd_vel_topic, 10
     );
     arm_target_pub_ = this->create_publisher<motor_control_ros2::msg::ArmTarget>(
         "/delta_arm/target", 10
+    );
+    serve_trigger_pub_ = this->create_publisher<std_msgs::msg::Bool>(
+        "/serve/trigger", 10
     );
     
     // 创建定时发布器
@@ -53,11 +56,15 @@ RemoteControlNode::RemoteControlNode() : Node("remote_control_node") {
         "轴配置 - 前后: %d, 左右: %d, 旋转: %d",
         config_.axis_forward, config_.axis_strafe, config_.axis_rotate);
     RCLCPP_INFO(this->get_logger(), 
-        "按钮配置 - 加速: %d, 减速: %d, 停止: %d",
-        config_.button_speed_up, config_.button_speed_down, config_.button_stop);
+        "按钮配置 - 加速: %d, 减速: %d, 停止: %d, 发球: %d",
+        config_.button_speed_up, config_.button_speed_down, config_.button_stop,
+        config_.button_serve_trigger);
     RCLCPP_INFO(this->get_logger(), 
         "速度配置 - 线速度上限: %.2f m/s, 角速度上限: %.2f rad/s",
         config_.max_linear_velocity, config_.max_angular_velocity);
+    RCLCPP_INFO(this->get_logger(),
+        "话题配置 - Joy: %s, CmdVel输出: %s",
+        config_.joy_topic.c_str(), config_.cmd_vel_topic.c_str());
     RCLCPP_INFO(this->get_logger(),
         "默认速度缩放因子: %.1f%%, 死区: %.2f",
         config_.default_speed_scale * 100.0, config_.deadzone);
@@ -70,12 +77,82 @@ RemoteControlNode::RemoteControlNode() : Node("remote_control_node") {
         config_.arm_trigger_reset_threshold);
 }
 
+void RemoteControlNode::loadRemoteControlParams(const std::string& config_file) {
+    YAML::Node root = YAML::LoadFile(config_file);
+    YAML::Node params = root;
+
+    if (root["remote_control_node"] && root["remote_control_node"]["ros__parameters"]) {
+        params = root["remote_control_node"]["ros__parameters"];
+    }
+
+    auto loadInt = [&params](const char* key, int& value) {
+        if (params[key]) {
+            value = params[key].as<int>();
+        }
+    };
+
+    auto loadDouble = [&params](const char* key, double& value) {
+        if (params[key]) {
+            value = params[key].as<double>();
+        }
+    };
+
+    auto loadString = [&params](const char* key, std::string& value) {
+        if (params[key]) {
+            value = params[key].as<std::string>();
+        }
+    };
+
+    loadInt("axis_forward", config_.axis_forward);
+    loadInt("axis_strafe", config_.axis_strafe);
+    loadInt("axis_rotate", config_.axis_rotate);
+    loadInt("button_speed_up", config_.button_speed_up);
+    loadInt("button_speed_down", config_.button_speed_down);
+    loadInt("button_stop", config_.button_stop);
+    loadInt("button_serve_trigger", config_.button_serve_trigger);
+
+    loadInt("arm_trigger_axis", config_.arm_trigger_axis);
+    loadDouble("arm_trigger_threshold", config_.arm_trigger_threshold);
+    loadDouble("arm_trigger_reset_threshold", config_.arm_trigger_reset_threshold);
+    loadDouble("arm_min_angle_rad", config_.arm_min_angle_rad);
+    loadDouble("arm_max_angle_rad", config_.arm_max_angle_rad);
+    loadInt("arm_protection_press_limit", config_.arm_protection_press_limit);
+    loadDouble("arm_protection_window_sec", config_.arm_protection_window_sec);
+
+    loadDouble("max_linear_velocity", config_.max_linear_velocity);
+    loadDouble("max_angular_velocity", config_.max_angular_velocity);
+    loadDouble("default_speed_scale", config_.default_speed_scale);
+    loadDouble("speed_scale_step", config_.speed_scale_step);
+    loadDouble("deadzone", config_.deadzone);
+    loadDouble("publish_frequency", config_.publish_frequency);
+    loadString("joy_topic", config_.joy_topic);
+    loadString("cmd_vel_topic", config_.cmd_vel_topic);
+
+    if (config_.arm_max_angle_rad < config_.arm_min_angle_rad) {
+        std::swap(config_.arm_max_angle_rad, config_.arm_min_angle_rad);
+        RCLCPP_WARN(this->get_logger(), "检测到 arm_min_angle_rad > arm_max_angle_rad，已自动交换");
+    }
+
+    if (config_.publish_frequency <= 0.0) {
+        throw std::runtime_error("publish_frequency 必须大于 0");
+    }
+
+    config_.deadzone = std::clamp(config_.deadzone, 0.0, 0.99);
+    config_.default_speed_scale = std::max(0.0, config_.default_speed_scale);
+    config_.speed_scale_step = std::max(0.0, config_.speed_scale_step);
+    config_.arm_trigger_threshold = std::clamp(config_.arm_trigger_threshold, 0.0, 1.0);
+    config_.arm_trigger_reset_threshold = std::clamp(config_.arm_trigger_reset_threshold, 0.0, 1.0);
+
+    RCLCPP_INFO(this->get_logger(), "遥控器参数加载完成");
+}
+
 void RemoteControlNode::joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg) {
     // 检查按钮索引是否有效
     if (msg->buttons.size() <= static_cast<size_t>(std::max({
         config_.button_speed_up, 
         config_.button_speed_down, 
-        config_.button_stop}))) {
+        config_.button_stop,
+        config_.button_serve_trigger}))) {
         return;
     }
     
@@ -115,11 +192,27 @@ void RemoteControlNode::joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg) 
         RCLCPP_INFO(this->get_logger(), "紧急停止");
     }
     last_button_stop_ = msg->buttons[config_.button_stop];
+
+    if (msg->buttons[config_.button_serve_trigger] && !last_button_serve_trigger_) {
+        auto serve_msg = std_msgs::msg::Bool();
+        serve_msg.data = true;
+        serve_trigger_pub_->publish(serve_msg);
+        RCLCPP_INFO(this->get_logger(), "发送风车发球触发");
+    }
+    last_button_serve_trigger_ = msg->buttons[config_.button_serve_trigger];
     
     // 读取摇杆输入并应用死区
     double forward = applyDeadzone(msg->axes[config_.axis_forward], config_.deadzone);
     double strafe = applyDeadzone(msg->axes[config_.axis_strafe], config_.deadzone);
     double rotate = applyDeadzone(msg->axes[config_.axis_rotate], config_.deadzone);
+
+    // 对平移摇杆做圆形归一化，避免前后/左右分量各自吃满后，
+    // 斜向满杆出现 sqrt(2) 倍的合速度。
+    const double linear_input_norm = std::hypot(forward, strafe);
+    if (linear_input_norm > 1.0) {
+        forward /= linear_input_norm;
+        strafe /= linear_input_norm;
+    }
     
     // 应用速度缩放和最大速度限制
     double speed_scale = getSpeedScaleFactor();

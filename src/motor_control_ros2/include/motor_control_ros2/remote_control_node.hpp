@@ -4,10 +4,12 @@
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <sensor_msgs/msg/joy.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <yaml-cpp/yaml.h>
 #include "motor_control_ros2/msg/arm_target.hpp"
 #include <memory>
+#include <string>
 
 namespace motor_control {
 
@@ -17,7 +19,7 @@ namespace motor_control {
  * 功能：
  * - 订阅遥控器输入（Joy 消息）
  * - 转换为底盘速度命令（Twist 消息）
- * - 发布到 /cmd_vel 供底盘控制节点使用
+ * - 发布到可配置的速度话题供下游底盘/复用节点使用
  * 
  * 支持的运动：
  * - 前后移动（linear.x）
@@ -66,6 +68,7 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr arm_ready_sub_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
     rclcpp::Publisher<motor_control_ros2::msg::ArmTarget>::SharedPtr arm_target_pub_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr serve_trigger_pub_;
 
     // 配置参数
     struct Config {
@@ -78,6 +81,7 @@ private:
         int button_speed_up = 5;     // 加速按钮（RB）
         int button_speed_down = 4;   // 减速按钮（LB）
         int button_stop = 6;         // 停止按钮（Back）
+        int button_serve_trigger = 0; // 发球触发按钮（A）
 
         // delta arm 扳机控制
         int arm_trigger_axis = 5;             // RT
@@ -89,8 +93,8 @@ private:
         double arm_protection_window_sec = 2.0;
 
         // 速度限制（m/s 和 rad/s）
-        double max_linear_velocity = 10.0;    // 最大线速度
-        double max_angular_velocity = 3.14;  // 最大角速度
+        double max_linear_velocity = 2.7;    // 最大线速度
+        double max_angular_velocity = 6.0;   // 最大角速度
 
         // 默认速度缩放因子
         double default_speed_scale = 0.5;    // 50% 的最大速度
@@ -101,6 +105,10 @@ private:
 
         // 发布频率
         double publish_frequency = 50.0;     // Hz
+
+        // 话题配置
+        std::string joy_topic = "/joy";
+        std::string cmd_vel_topic = "/cmd_vel_remote";
     } config_;
 
     enum class ArmTriggerState {
@@ -123,6 +131,7 @@ private:
     bool last_button_speed_up_ = false;      // 上一帧加速按钮状态
     bool last_button_speed_down_ = false;    // 上一帧减速按钮状态
     bool last_button_stop_ = false;          // 上一帧停止按钮状态
+    bool last_button_serve_trigger_ = false; // 上一帧发球按钮状态
 
     /**
      * @brief 定时发布最后一条命令

@@ -44,6 +44,8 @@ JoystickControlNode::JoystickControlNode()
     this->declare_parameter("button_normal_mode", 0);     // A
     this->declare_parameter("button_fast_mode", 3);       // Y
     this->declare_parameter("button_enable", 7);          // Start
+    this->declare_parameter("joy_topic", "/joy");
+    this->declare_parameter("cmd_vel_topic", "/cmd_vel_joy");
     
     // 读取参数
     max_linear_velocity_ = this->get_parameter("max_linear_velocity").as_double();
@@ -70,6 +72,8 @@ JoystickControlNode::JoystickControlNode()
     button_normal_mode_ = this->get_parameter("button_normal_mode").as_int();
     button_fast_mode_ = this->get_parameter("button_fast_mode").as_int();
     button_enable_ = this->get_parameter("button_enable").as_int();
+    joy_topic_ = this->get_parameter("joy_topic").as_string();
+    cmd_vel_topic_ = this->get_parameter("cmd_vel_topic").as_string();
     
     // 初始化为正常模式
     current_speed_gain_ = speed_mode_normal_;
@@ -83,17 +87,20 @@ JoystickControlNode::JoystickControlNode()
         "速度模式: 慢速 %.0f%%, 正常 %.0f%%, 快速 %.0f%%",
         speed_mode_slow_ * 100, speed_mode_normal_ * 100, speed_mode_fast_ * 100);
     RCLCPP_INFO(this->get_logger(),
+        "话题配置: Joy=%s, CmdVel输出=%s",
+        joy_topic_.c_str(), cmd_vel_topic_.c_str());
+    RCLCPP_INFO(this->get_logger(),
         "按 Start 键启用控制，按 B 键急停");
     
     // 创建订阅者
     joy_sub_ = this->create_subscription<sensor_msgs::msg::Joy>(
-        "/joy", 10,
+        joy_topic_, 10,
         std::bind(&JoystickControlNode::joyCallback, this, std::placeholders::_1)
     );
     
     // 创建发布者
     cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>(
-        "/cmd_vel", 10
+        cmd_vel_topic_, 10
     );
     
     enable_pub_ = this->create_publisher<std_msgs::msg::Bool>(
@@ -111,7 +118,7 @@ JoystickControlNode::JoystickControlNode()
     last_update_time_ = this->now();
     
     RCLCPP_INFO(this->get_logger(), 
-        "等待手柄输入... (订阅 /joy 话题)");
+        "等待手柄输入... (订阅 %s)", joy_topic_.c_str());
 }
 
 void JoystickControlNode::joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg) {

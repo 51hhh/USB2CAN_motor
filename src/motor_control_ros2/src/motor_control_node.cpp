@@ -451,10 +451,10 @@ private:
         ssize_t last_n = 0;
 
         // 发送接收 + 帧扫描解析
-        constexpr int kSerialWaitMs = 4;
+        constexpr int kSerialWaitMs = 2;
         constexpr int kSerialTimeoutMs = 8;
         auto try_recv_parse = [&](uint8_t (&buf)[BUF_SIZE]) -> bool {
-          ssize_t n = serial->sendRecvAccumulate(cmd, 17, buf, BUF_SIZE, kSerialWaitMs, kSerialTimeoutMs);
+          ssize_t n = serial->sendRecvAccumulate(cmd, 17, buf, FRAME_LEN, kSerialWaitMs, kSerialTimeoutMs);
           last_n = n;
           if (n <= 0) return false;
           for (ssize_t off = 0; off + static_cast<ssize_t>(FRAME_LEN) <= n; ++off) {
@@ -675,6 +675,8 @@ private:
       msg.model = (motor->getMotorType() == MotorType::DJI_GM6020) ? "GM6020" : "GM3508";
       msg.online = motor->isOnline();
       msg.angle = motor->getOutputPosition() * 180.0 / M_PI;
+      msg.rpm = motor->getRPM();
+      msg.current = motor->getCurrent();
       msg.temperature = static_cast<uint8_t>(motor->getTemperature());
       msg.control_frequency = actual_control_freq_;  // 添加控制频率
       dji_state_pub_->publish(msg);

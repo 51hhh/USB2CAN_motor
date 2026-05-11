@@ -60,7 +60,7 @@ serial_interfaces:
     baudrate: 4000000
     protocol: native
     motors:
-      - name: arm_motor_1
+      - name: arm_delta_motor_1
         type: GO8010
         id: 0
         gear_ratio: 6.33
@@ -69,19 +69,42 @@ serial_interfaces:
     baudrate: 4000000
     protocol: native
     motors:
-      - name: arm_motor_2
+      - name: arm_delta_motor_2
         type: GO8010
         id: 0
         gear_ratio: 6.33
+      - name: arm_motor_r_1
+        type: GO8010
+        id: 2
+        gear_ratio: 6.33     
+      - name: arm_motor_r_2
+        type: GO8010
+        id: 3
+        gear_ratio: 6.33 
 
   - device: /dev/ttyUSB2
     baudrate: 4000000
     protocol: native
     motors:
-      - name: arm_motor_3
+      - name: arm_delta_motor_3
         type: GO8010
         id: 0
         gear_ratio: 6.33
+  
+  # ⚠️ ttyUSB0 已被定位板(码盘)占用 (positioning_bridge_ros2),
+  # 此段 arm_motor_l_1/2 暂时注释; 如需恢复请重新接线到其它 ttyUSB
+  # - device: /dev/ttyUSB0
+  #   baudrate: 4000000
+  #   protocol: native
+  #   motors:
+  #     - name: arm_motor_l_1
+  #       type: GO8010
+  #       id: 0
+  #       gear_ratio: 6.33
+  #     - name: arm_motor_l_2
+  #       type: GO8010
+  #       id: 1
+  #       gear_ratio: 6.33
 
 # 配置说明:
 # 1. 取消注释需要使用的接口和电机

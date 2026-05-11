@@ -5,6 +5,7 @@
 #include <sensor_msgs/msg/joy.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <string>
 
 namespace motor_control {
 
@@ -56,6 +57,9 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr enable_pub_;
     rclcpp::TimerBase::SharedPtr publish_timer_;
+
+    std::string joy_topic_;
+    std::string cmd_vel_topic_;
     
     // 参数
     double max_linear_velocity_;   // 最大线速度 (m/s)

@@ -157,6 +157,7 @@ void SerialInterface::setRs485Direction(bool tx_mode) {
 }
 
 ssize_t SerialInterface::receive(uint8_t* buffer, size_t max_len, int timeout_ms) {
+  (void)timeout_ms; // Not used, default select to 2ms below
   if (fd_ < 0) {
     return -1;
   }
@@ -167,8 +168,8 @@ ssize_t SerialInterface::receive(uint8_t* buffer, size_t max_len, int timeout_ms
   FD_SET(fd_, &readfds);
   
   struct timeval tv;
-  tv.tv_sec = timeout_ms / 1000;
-  tv.tv_usec = (timeout_ms % 1000) * 1000;
+  tv.tv_sec = 0;
+  tv.tv_usec = 2000; // 固定使用 2ms（4Mbps 下 16 字节传输约 0.032ms，2ms 已有充足余量）
   
   int select_result = select(fd_ + 1, &readfds, NULL, NULL, &tv);
   
@@ -244,28 +245,17 @@ ssize_t SerialInterface::sendRecvAccumulate(const uint8_t* send_data, size_t sen
   }
 
   size_t total = 0;
-  auto start = std::chrono::steady_clock::now();
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
 
   while (total < max_len) {
-    auto now = std::chrono::steady_clock::now();
-    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count();
-    if (elapsed_ms >= timeout_ms) {
+    if (std::chrono::steady_clock::now() >= deadline) {
       break;
     }
 
-    // 计算剩余超时，传给 receive 避免 select 阻塞超过外部 timeout
-    int remaining_ms = timeout_ms - static_cast<int>(elapsed_ms);
-    if (remaining_ms < 1) remaining_ms = 1;
-
-    ssize_t r = receive(recv_buffer + total, max_len - total, remaining_ms);
+    ssize_t r = receive(recv_buffer + total, max_len - total, timeout_ms);
     if (r > 0) {
       total += static_cast<size_t>(r);
-      // 收到数据后继续短暂累积，尽量拼完整帧
-      continue;
     }
-
-    // 无数据时小睡，避免 busy loop
-    break;
   }
 
   return static_cast<ssize_t>(total);

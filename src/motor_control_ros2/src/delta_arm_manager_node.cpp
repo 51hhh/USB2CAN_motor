@@ -32,7 +32,7 @@ DeltaArmManager::DeltaArmManager()
   has_feedback_.fill(false);
   last_positions_.fill(0.0);
   zero_positions_.fill(0.0);
-  motor_names_ = {"arm_motor_1", "arm_motor_2", "arm_motor_3"};
+  motor_names_ = {"arm_delta_motor_1", "arm_delta_motor_2", "arm_delta_motor_3"};
   motor_devices_ = {"", "", ""};
   motor_ids_   = {0, 0, 0};
 

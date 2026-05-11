@@ -65,13 +65,13 @@ top_idle_timeout: 1.0
 
 # 电机名称与 ID（对应 motors.yaml 中的 joint_name）
 motors:
-  - name: "arm_motor_1"
+  - name: "arm_delta_motor_1"
     id: 0
     device: "/dev/ttyUSB3"
-  - name: "arm_motor_2"
+  - name: "arm_delta_motor_2"
     id: 0
     device: "/dev/ttyUSB1"
-  - name: "arm_motor_3"
+  - name: "arm_delta_motor_3"
     id: 0
     device: "/dev/ttyUSB2"
 
