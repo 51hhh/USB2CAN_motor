@@ -12,8 +12,8 @@ omni_chassis_control_node:
     install_angle: 45.0             # 轮子安装角度 (度)，X 形布置为 45°
     
     # 速度限制
-    max_linear_velocity: 0.1      # 最大线速度 (m/s) - 对应约800 RPM电机转速
-    max_angular_velocity: 0.1     # 最大角速度 (rad/s)
+    max_linear_velocity: 2.0      # 最大线速度 (m/s)
+    max_angular_velocity: 2.0     # 最大角速度 (rad/s)
     
     # 命令超时
     cmd_timeout: 0.5                # 速度命令超时时间 (s)
