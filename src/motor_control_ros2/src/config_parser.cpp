@@ -62,6 +62,11 @@ MotorConfig ConfigParser::parseMotorConfig(const YAML::Node& node) {
     config.offset = node["offset"].as<double>();
   }
   
+  // 镜像源电机
+  if (node["mirror_from"]) {
+    config.mirror_from = node["mirror_from"].as<std::string>();
+  }
+
   // GO8010 电机特定参数
   if (node["gear_ratio"]) {
     config.gear_ratio = node["gear_ratio"].as<double>();

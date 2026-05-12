@@ -51,13 +51,18 @@ jobs:
     permissions:
       contents: read
     env:
-      WORKSPACE_SRC_PATH: ${{ github.workspace }}/src
+      WORKSPACE_PATH: ${{ github.workspace }}/ws
+      WORKSPACE_SRC_PATH: ${{ github.workspace }}/ws/src
       COLCON_PACKAGES_ARG: --packages-up-to motor_control_ros2
       ROS_DISTRO: humble
     steps:
+      - name: Create workspace
+        run: mkdir -p "${{ github.workspace }}/ws/src"
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          path: ws/src/USB2CAN_motor
           persist-credentials: false
 
       - name: Hold Firefox to avoid snap installation
@@ -72,7 +77,10 @@ jobs:
       - name: Install system tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-colcon-common-extensions python3-rosdep
+          sudo apt-get install -y \
+            python3-colcon-common-extensions \
+            python3-rosdep \
+            nlohmann-json3-dev
 
       - name: Init rosdep
         run: |
@@ -92,17 +100,20 @@ jobs:
       - name: Build
         run: |
           source /opt/ros/${ROS_DISTRO}/setup.bash
+          cd "${WORKSPACE_PATH}"
           colcon build --event-handlers console_cohesion+ ${COLCON_PACKAGES_ARG}
 
       - name: Test
         run: |
           source /opt/ros/${ROS_DISTRO}/setup.bash
+          cd "${WORKSPACE_PATH}"
           colcon test --event-handlers console_cohesion+ ${COLCON_PACKAGES_ARG}
 
       - name: Show test results
         if: always()
         run: |
           source /opt/ros/${ROS_DISTRO}/setup.bash
+          cd "${WORKSPACE_PATH}"
           colcon test-result --verbose
 
   pr-gate:

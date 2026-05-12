@@ -256,7 +256,7 @@ private:
       oss << COLOR_BOLD << COLOR_MAGENTA << "【达妙电机】" << COLOR_RESET << "\n";
       oss << COLOR_DIM 
           << "┌─────────────┬────────┬──────────┬──────────┬──────────┬──────┬────────┐\n"
-          << "│ 名称        │ 状态   │ 位置(rad)│ 速度(r/s)│ 力矩(Nm) │ 温度 │ 频率   │\n"
+          << "│ 名称        │ 状态   │ 角度(°)  │ 速度(r/s)│ 力矩(Nm) │ 温度 │ 频率   │\n"
           << "├─────────────┼────────┼──────────┼──────────┼──────────┼──────┼────────┤"
           << COLOR_RESET << "\n";
       
@@ -267,7 +267,7 @@ private:
         
         oss << "│ " << std::left << std::setw(11) << name << " │ "
             << status_color << std::setw(6) << status_text << COLOR_RESET << " │ "
-            << std::right << std::setw(8) << std::fixed << std::setprecision(3) << state.position << " │ "
+          << std::right << std::setw(8) << std::fixed << std::setprecision(3) << (state.position * 180.0 / M_PI) << " │ "
             << std::setw(8) << std::setprecision(2) << state.velocity << " │ "
             << std::setw(8) << std::setprecision(2) << state.torque << " │ "
             << std::setw(4) << (int)state.temp_mos << "°C │ "
@@ -284,7 +284,7 @@ private:
       oss << COLOR_BOLD << COLOR_BLUE << "【宇树电机】" << COLOR_RESET << "\n";
       oss << COLOR_DIM
           << "┌─────────────┬──────────┬────┬────────┬──────────┬──────────┬──────────┬──────┬──────┬────────┐\n"
-          << "│ 名称        │ 型号     │ ID │ 状态   │ 位置(rad)│ 速度(r/s)│ 力矩(Nm) │ 温度 │ 错误 │ 频率   │\n"
+          << "│ 名称        │ 型号     │ ID │ 状态   │ 角度(°)  │ 速度(r/s)│ 力矩(Nm) │ 温度 │ 错误 │ 频率   │\n"
           << "├─────────────┼──────────┼────┼────────┼──────────┼──────────┼──────────┼──────┼──────┼────────┤"
           << COLOR_RESET << "\n";
 
@@ -297,7 +297,7 @@ private:
             << std::setw(8) << "A1" << " │ "
             << std::right << std::setw(2) << (int)state.motor_id << " │ "
             << status_color << std::setw(6) << status_text << COLOR_RESET << " │ "
-            << std::right << std::setw(8) << std::fixed << std::setprecision(3) << state.position << " │ "
+          << std::right << std::setw(8) << std::fixed << std::setprecision(3) << (state.position * 180.0 / M_PI) << " │ "
             << std::setw(8) << std::setprecision(2) << state.velocity << " │ "
             << std::setw(8) << std::setprecision(2) << state.torque << " │ "
             << std::setw(4) << (int)state.temperature << "°C │ "
@@ -314,7 +314,7 @@ private:
             << std::setw(8) << "GO-8010" << " │ "
             << std::right << std::setw(2) << (int)state.motor_id << " │ "
             << status_color << std::setw(6) << status_text << COLOR_RESET << " │ "
-            << std::right << std::setw(8) << std::fixed << std::setprecision(3) << state.position << " │ "
+          << std::right << std::setw(8) << std::fixed << std::setprecision(3) << (state.position * 180.0 / M_PI) << " │ "
             << std::setw(8) << std::setprecision(2) << state.velocity << " │ "
             << std::setw(8) << std::setprecision(2) << state.torque << " │ "
             << std::setw(4) << (int)state.temperature << "°C │ "

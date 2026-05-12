@@ -20,6 +20,9 @@ struct MotorConfig {
   int direction = 1;          // 方向 (1 或 -1)
   double offset = 0.0;        // 零位偏移
 
+  // 镜像源电机名称（使用源电机的编码器数据替代自身编码器）
+  std::string mirror_from;
+
   // GO8010 电机特定参数
   double gear_ratio = 6.33;   // 齿轮减速比
   double k_pos = 0.0;         // 位置控制增益

@@ -63,6 +63,7 @@ add_library(motor_control_lib
   # 运动学
   src/steer_wheel_kinematics.cpp
   src/omni_wheel_kinematics.cpp
+  src/parallel_arm_kinematics.cpp
 )
 
 # 为库添加依赖
@@ -270,6 +271,47 @@ set_target_properties(delta_arm_manager PROPERTIES
   INSTALL_RPATH "$ORIGIN"
 )
 
+# C++ 可执行文件 - 示教回放控制节点
+find_package(nlohmann_json REQUIRED)
+
+add_executable(teach_playback_control_node
+  src/teach_playback_control_node.cpp
+)
+
+target_link_libraries(teach_playback_control_node
+  "${cpp_typesupport_target}"
+  nlohmann_json::nlohmann_json
+)
+
+ament_target_dependencies(teach_playback_control_node
+  rclcpp
+  std_msgs
+  sensor_msgs
+)
+
+set_target_properties(teach_playback_control_node PROPERTIES
+  INSTALL_RPATH "$ORIGIN"
+)
+
+# C++ 可执行文件 - 双臂并联平面机构控制节点
+add_executable(parallel_arm_control_node
+  src/parallel_arm_control_node.cpp
+)
+
+target_link_libraries(parallel_arm_control_node
+  motor_control_lib
+  "${cpp_typesupport_target}"
+)
+
+ament_target_dependencies(parallel_arm_control_node
+  rclcpp
+  std_msgs
+)
+
+set_target_properties(parallel_arm_control_node PROPERTIES
+  INSTALL_RPATH "$ORIGIN"
+)
+
 # C++ 可执行文件 - 排球击球管理器
 add_executable(volleyball_strike_manager
   src/volleyball_strike_manager.cpp
@@ -325,6 +367,8 @@ install(TARGETS
   cmd_vel_mux_node
   vision_catch_controller_node
   delta_arm_manager
+  teach_playback_control_node
+  parallel_arm_control_node
   volleyball_strike_manager
   serve_windmill_manager
   ARCHIVE DESTINATION lib
