@@ -7,6 +7,5 @@
 #include "motor_control_ros2/msg/detail/damiao_motor_state__struct.hpp"
 #include "motor_control_ros2/msg/detail/damiao_motor_state__builder.hpp"
 #include "motor_control_ros2/msg/detail/damiao_motor_state__traits.hpp"
-#include "motor_control_ros2/msg/detail/damiao_motor_state__type_support.hpp"
 
 #endif  // MOTOR_CONTROL_ROS2__MSG__DAMIAO_MOTOR_STATE_HPP_

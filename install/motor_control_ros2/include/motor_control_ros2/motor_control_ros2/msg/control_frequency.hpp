@@ -7,6 +7,5 @@
 #include "motor_control_ros2/msg/detail/control_frequency__struct.hpp"
 #include "motor_control_ros2/msg/detail/control_frequency__builder.hpp"
 #include "motor_control_ros2/msg/detail/control_frequency__traits.hpp"
-#include "motor_control_ros2/msg/detail/control_frequency__type_support.hpp"
 
 #endif  // MOTOR_CONTROL_ROS2__MSG__CONTROL_FREQUENCY_HPP_

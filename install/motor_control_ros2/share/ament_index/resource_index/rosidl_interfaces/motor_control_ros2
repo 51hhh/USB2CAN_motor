@@ -20,6 +20,8 @@ msg/MotorStateGeneric.idl
 msg/MotorStateGeneric.msg
 msg/SteerWheelState.idl
 msg/SteerWheelState.msg
+msg/StrikeCommand.idl
+msg/StrikeCommand.msg
 msg/UnitreeGO8010Command.idl
 msg/UnitreeGO8010Command.msg
 msg/UnitreeGO8010State.idl

@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -246,21 +245,12 @@ using UnitreeGO8010Command =
   motor_control_ros2::msg::UnitreeGO8010Command_<std::allocator<void>>;
 
 // constant definitions
-#if __cplusplus < 201703L
-// static constexpr member variable definitions are only needed in C++14 and below, deprecated in C++17
 template<typename ContainerAllocator>
 constexpr uint8_t UnitreeGO8010Command_<ContainerAllocator>::MODE_BRAKE;
-#endif  // __cplusplus < 201703L
-#if __cplusplus < 201703L
-// static constexpr member variable definitions are only needed in C++14 and below, deprecated in C++17
 template<typename ContainerAllocator>
 constexpr uint8_t UnitreeGO8010Command_<ContainerAllocator>::MODE_FOC;
-#endif  // __cplusplus < 201703L
-#if __cplusplus < 201703L
-// static constexpr member variable definitions are only needed in C++14 and below, deprecated in C++17
 template<typename ContainerAllocator>
 constexpr uint8_t UnitreeGO8010Command_<ContainerAllocator>::MODE_CALIBRATE;
-#endif  // __cplusplus < 201703L
 
 }  // namespace msg
 
