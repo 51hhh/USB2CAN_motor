@@ -20,6 +20,7 @@ enum class FrameKind {
   HEARTBEAT,
   TIME_SYNC_RESPONSE,
   SET_LOCAL_ORIGIN_ACK,
+  IR_TRIGGER,   // 红外传感器触发事件（下位机检测到球经过时发送）
 };
 
 struct PoseSample {

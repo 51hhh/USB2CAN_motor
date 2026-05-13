@@ -292,6 +292,28 @@ set_target_properties(teach_playback_control_node PROPERTIES
 
 # Note: parallel_arm_control_node 和 volleyball_strike_manager 已删除
 
+# C++ 可执行文件 - 击球控制节点
+add_executable(strike_node
+  src/nodes/strike_node.cpp
+)
+
+target_link_libraries(strike_node
+  "${cpp_typesupport_target}"
+  yaml-cpp
+)
+
+ament_target_dependencies(strike_node
+  rclcpp
+  std_msgs
+  sensor_msgs
+  geometry_msgs
+  ament_index_cpp
+)
+
+set_target_properties(strike_node PROPERTIES
+  INSTALL_RPATH "$ORIGIN"
+)
+
 # C++ 可执行文件 - 风车发球管理器
 add_executable(serve_windmill_manager
   src/nodes/serve_windmill_manager.cpp
@@ -326,6 +348,7 @@ install(TARGETS
   delta_arm_manager
   teach_playback_control_node
   serve_windmill_manager
+  strike_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}
