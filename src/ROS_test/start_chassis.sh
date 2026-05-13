@@ -34,7 +34,8 @@ echo "启动节点..."
 echo ""
 
 # 公共 source 命令
-SOURCE_CMD="cd $WS_DIR && source /opt/ros/humble/setup.bash && source install/setup.bash"
+ENV_VARS="export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp && export CYCLONEDDS_URI=file:///home/sunrise/mid360/config/cyclonedds.xml && export ROS_DOMAIN_ID=42"
+SOURCE_CMD="cd $WS_DIR && $ENV_VARS && source /opt/ros/humble/setup.bash && source install/setup.bash"
 
 # 单窗口分屏布局：5个节点在同一页面
 echo "启动全部 5 个节点（分屏模式）..."
@@ -53,7 +54,7 @@ tmux split-window -t "$SESSION" -v \
 
 # 分裂出第4个 pane（joy_node）
 tmux split-window -t "$SESSION" -v \
-  "bash -c 'source /opt/ros/humble/setup.bash && echo [4]joy_node && ros2 run joy joy_node --ros-args -p device_id:=0; exec bash'"
+  "bash -c '$ENV_VARS && source /opt/ros/humble/setup.bash && echo [4]joy_node && ros2 run joy joy_node --ros-args -p device_id:=0; exec bash'"
 
 # 分裂出第5个 pane（joystick_control_node）
 tmux split-window -t "$SESSION" -v \
