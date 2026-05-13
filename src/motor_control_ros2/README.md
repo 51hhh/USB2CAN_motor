@@ -69,7 +69,7 @@ src/motor_control_ros2/
 ### 1. 编译
 
 ```bash
-cd /home/rick/desktop/ros/usb2can
+cd <工程根目录>
 colcon build --packages-select motor_control_ros2
 source install/setup.bash
 ```
