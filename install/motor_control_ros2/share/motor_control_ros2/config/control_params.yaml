@@ -1,4 +1,1 @@
-motor_control_node:
-  ros__parameters:
-    control_frequency: 200.0     # Hz - 控制循环和状态发布频率
-    config_file: "config/motors.yaml"
+/home/toe/111/USB2CAN_motor/src/motor_control_ros2/config/control_params.yaml

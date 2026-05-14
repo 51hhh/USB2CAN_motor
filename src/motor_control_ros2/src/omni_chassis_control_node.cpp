@@ -23,7 +23,7 @@ namespace motor_control {
  * @brief X 形全向轮底盘控制节点
  * 
  * 功能：
- * - 订阅底盘速度命令 (/cmd_vel)
+ * - 订阅底盘速度命令（默认 /cmd_vel，可由配置文件修改）
  * - X 形全向轮运动学逆解算 → 4 个电机速度命令
  * - 发布 DJI GM3508 电机控制命令
  * - 从电机反馈计算里程计
@@ -77,10 +77,11 @@ public:
         RCLCPP_INFO(this->get_logger(),
             "驱动方向: FL=%d, FR=%d, RL=%d, RR=%d",
             drive_directions_[0], drive_directions_[1], drive_directions_[2], drive_directions_[3]);
+        RCLCPP_INFO(this->get_logger(), "底盘速度输入: %s", cmd_vel_topic_.c_str());
         
         // 创建订阅者
         cmd_vel_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
-            "/cmd_vel", 10,
+            cmd_vel_topic_, 10,
             std::bind(&OmniChassisControlNode::cmdVelCallback, this, std::placeholders::_1)
         );
         
@@ -164,6 +165,7 @@ private:
         loadDouble("max_angular_velocity", max_angular_velocity_);
         loadDouble("cmd_timeout", cmd_timeout_);
         loadDouble("velocity_filter_alpha", velocity_filter_alpha_);
+        loadString("cmd_vel_topic", cmd_vel_topic_);
 
         loadString("fl_motor", motor_names_[0]);
         loadString("fr_motor", motor_names_[1]);
@@ -351,6 +353,7 @@ private:
     std::unique_ptr<OmniWheelKinematics> kinematics_;
     std::array<std::string, 4> motor_names_ {{"DJI3508_1", "DJI3508_2", "DJI3508_3", "DJI3508_4"}};  // [FL, FR, RL, RR]
     std::array<int, 4> drive_directions_ {{1, 1, 1, 1}};  // [FL, FR, RL, RR]
+    std::string cmd_vel_topic_ {"/cmd_vel"};
     
     // 参数
     double control_frequency_ {100.0};

@@ -1,1 +1,1 @@
-rclcpp;std_msgs;sensor_msgs;geometry_msgs;nav_msgs;tf2;tf2_geometry_msgs;yaml-cpp;ament_index_cpp;rosidl_default_runtime;ament_lint_auto;ament_lint_common;ament_cmake_gtest;ament_cmake_pytest
+/home/toe/111/USB2CAN_motor/build/motor_control_ros2/ament_cmake_index/share/ament_index/resource_index/package_run_dependencies/motor_control_ros2

@@ -1,4 +1,1 @@
-source;share/motor_control_ros2/environment/ament_prefix_path.sh
-source;share/motor_control_ros2/environment/library_path.sh
-source;share/motor_control_ros2/environment/path.sh
-source;share/motor_control_ros2/environment/pythonpath.sh
+/home/toe/111/USB2CAN_motor/build/motor_control_ros2/ament_cmake_environment_hooks/local_setup.dsv

@@ -6,6 +6,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <functional>
@@ -52,14 +53,26 @@ public:
             RCLCPP_WARN(this->get_logger(), "odom_timeout_sec=%.3f 非法，回退到 0.5", odom_timeout_sec_);
             odom_timeout_sec_ = 0.5;
         }
+        if (yaw_kp_ < 0.0) {
+            RCLCPP_WARN(this->get_logger(), "yaw_kp=%.3f 非法，回退到 1.5", yaw_kp_);
+            yaw_kp_ = 1.5;
+        }
+        if (max_angular_speed_ < 0.0) {
+            RCLCPP_WARN(this->get_logger(), "max_angular_speed=%.3f 非法，回退到 0.1", max_angular_speed_);
+            max_angular_speed_ = 0.1;
+        }
+        if (yaw_tolerance_rad_ < 0.0) {
+            RCLCPP_WARN(this->get_logger(), "yaw_tolerance_rad=%.3f 非法，回退到 0.03", yaw_tolerance_rad_);
+            yaw_tolerance_rad_ = 0.03;
+        }
 
         goal_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
             goal_topic_, 10,
-            std::bind(&VisionCatchControllerNode::goalCallback, this, std::placeholders::_1));
+            std::bind(&VisionCatchControllerNode::goalCallback, this, std::placeholders::_1));//接球目标订阅
         odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
             odom_topic_, 20,
-            std::bind(&VisionCatchControllerNode::odomCallback, this, std::placeholders::_1));
-        cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>(cmd_vel_topic_, 10);
+            std::bind(&VisionCatchControllerNode::odomCallback, this, std::placeholders::_1));//里程计订阅
+        cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>(cmd_vel_topic_, 10);//速度发布
 
         auto period = std::chrono::duration<double>(1.0 / control_frequency_);
         control_timer_ = this->create_wall_timer(
@@ -115,8 +128,23 @@ private:
         loadDouble("position_tolerance", position_tolerance_);
         loadDouble("goal_timeout_sec", goal_timeout_sec_);
         loadDouble("odom_timeout_sec", odom_timeout_sec_);
+        loadDouble("yaw_kp", yaw_kp_);
+        loadDouble("max_angular_speed", max_angular_speed_);
+        loadDouble("yaw_tolerance_rad", yaw_tolerance_rad_);
+        if (params["yaw_hold_enabled"]) {
+            yaw_hold_enabled_ = params["yaw_hold_enabled"].as<bool>();
+        }
+        if (params["use_goal_yaw"]) {
+            use_goal_yaw_ = params["use_goal_yaw"].as<bool>();
+        }
 
         RCLCPP_INFO(this->get_logger(), "vision_catch_controller_node 参数加载完成: %s", config_file.c_str());
+    }
+
+    static double yawFromQuaternion(const geometry_msgs::msg::Quaternion & q) {
+        const double siny_cosp = 2.0 * (q.w * q.z + q.x * q.y);
+        const double cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z);
+        return std::atan2(siny_cosp, cosy_cosp);
     }
 
     static double normalizeAngle(double angle) {
@@ -133,7 +161,7 @@ private:
         return geometry_msgs::msg::Twist();
     }
 
-    void goalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+    void    goalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
         latest_goal_ = *msg;
         last_goal_time_ = this->now();
         has_goal_ = true;
@@ -147,17 +175,42 @@ private:
 
         RCLCPP_INFO(this->get_logger(), "更新接球目标: x=%.3f y=%.3f",
             msg->pose.position.x, msg->pose.position.y);
+
+        if (yaw_hold_enabled_ && use_goal_yaw_) {
+            target_yaw_ = yawFromQuaternion(msg->pose.orientation);
+            target_yaw_initialized_ = true;
+            RCLCPP_INFO(this->get_logger(), "更新目标 yaw: %.3f rad", target_yaw_);
+        }
     }
 
     void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg) {
         latest_odom_ = *msg;
         last_odom_time_ = this->now();
         has_odom_ = true;
+
+        if (yaw_hold_enabled_ && !target_yaw_initialized_) {
+            target_yaw_ = yawFromQuaternion(msg->pose.pose.orientation);
+            target_yaw_initialized_ = true;
+            RCLCPP_INFO(this->get_logger(), "yaw 保持目标初始化: %.3f rad", target_yaw_);
+        }
+    }
+
+    double computeYawCommand(double current_yaw) const {
+        if (!yaw_hold_enabled_ || !target_yaw_initialized_) {
+            return 0.0;
+        }
+
+        const double yaw_error = normalizeAngle(target_yaw_ - current_yaw);
+        if (std::abs(yaw_error) <= yaw_tolerance_rad_) {
+            return 0.0;
+        }
+
+        return std::clamp(yaw_kp_ * yaw_error, -max_angular_speed_, max_angular_speed_);
     }
 
     void controlLoop() {
         if (!has_goal_ || !has_odom_) {
-            publishIfChanged(zeroTwist());
+            publishCommand(zeroTwist());
             return;
         }
 
@@ -167,7 +220,7 @@ private:
                 RCLCPP_WARN(this->get_logger(), "目标超时，停车等待新落点");
                 goal_timeout_reported_ = true;
             }
-            publishIfChanged(zeroTwist());
+            publishCommand(zeroTwist());
             return;
         }
         goal_timeout_reported_ = false;
@@ -177,7 +230,7 @@ private:
                 RCLCPP_WARN(this->get_logger(), "/odom 超时，停车等待位姿恢复");
                 odom_timeout_reported_ = true;
             }
-            publishIfChanged(zeroTwist());
+            publishCommand(zeroTwist());
             return;
         }
         odom_timeout_reported_ = false;
@@ -185,10 +238,8 @@ private:
         const double current_x = latest_odom_.pose.pose.position.x;
         const double current_y = latest_odom_.pose.pose.position.y;
 
-        const auto & q = latest_odom_.pose.pose.orientation;
-        const double siny_cosp = 2.0 * (q.w * q.z + q.x * q.y);
-        const double cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z);
-        const double current_yaw = std::atan2(siny_cosp, cosy_cosp);
+        const double current_yaw = yawFromQuaternion(latest_odom_.pose.pose.orientation);
+        const double yaw_cmd = computeYawCommand(current_yaw);
 
         const double dx_world = latest_goal_.pose.position.x - current_x;
         const double dy_world = latest_goal_.pose.position.y - current_y;
@@ -199,7 +250,9 @@ private:
                 RCLCPP_INFO(this->get_logger(), "已到达接球等待点，进入停车等待");
                 reached_goal_ = true;
             }
-            publishIfChanged(zeroTwist());
+            geometry_msgs::msg::Twist cmd;
+            cmd.angular.z = yaw_cmd;
+            publishCommand(cmd);
             return;
         }
         reached_goal_ = false;
@@ -213,27 +266,17 @@ private:
         geometry_msgs::msg::Twist cmd;
         cmd.linear.x = speed * std::cos(heading_error);
         cmd.linear.y = speed * std::sin(heading_error);
-        cmd.angular.z = 0.0;
+        cmd.angular.z = yaw_cmd;
 
-        publishIfChanged(cmd);
+        publishCommand(cmd);
     }
 
-    void publishIfChanged(const geometry_msgs::msg::Twist & cmd) {
-        constexpr double eps = 1e-6;
-        const bool changed =
-            std::abs(last_published_cmd_.linear.x - cmd.linear.x) > eps ||
-            std::abs(last_published_cmd_.linear.y - cmd.linear.y) > eps ||
-            std::abs(last_published_cmd_.angular.z - cmd.angular.z) > eps;
-
-        if (changed || !has_published_cmd_) {
-            cmd_vel_pub_->publish(cmd);
-            last_published_cmd_ = cmd;
-            has_published_cmd_ = true;
-        }
+    void publishCommand(const geometry_msgs::msg::Twist & cmd) {
+        cmd_vel_pub_->publish(cmd);
     }
 
     std::string goal_topic_ {"/auto/goal_pose"};
-    std::string odom_topic_ {"/odom"};
+    std::string odom_topic_ {"/odom_wheels"};
     std::string cmd_vel_topic_ {"/cmd_vel_remote"};
     std::string goal_frame_ {"vision_world"};
 
@@ -243,17 +286,22 @@ private:
     double position_tolerance_ {0.05};
     double goal_timeout_sec_ {1.0};
     double odom_timeout_sec_ {0.5};
+    bool yaw_hold_enabled_ {true};
+    bool use_goal_yaw_ {false};
+    double yaw_kp_ {1.5};
+    double max_angular_speed_ {0.1};
+    double yaw_tolerance_rad_ {0.03};
+    double target_yaw_ {0.0};
 
     bool has_goal_ {false};
     bool has_odom_ {false};
     bool reached_goal_ {false};
+    bool target_yaw_initialized_ {false};
     bool goal_timeout_reported_ {false};
     bool odom_timeout_reported_ {false};
-    bool has_published_cmd_ {false};
 
     geometry_msgs::msg::PoseStamped latest_goal_;
     nav_msgs::msg::Odometry latest_odom_;
-    geometry_msgs::msg::Twist last_published_cmd_;
     rclcpp::Time last_goal_time_;
     rclcpp::Time last_odom_time_;
 

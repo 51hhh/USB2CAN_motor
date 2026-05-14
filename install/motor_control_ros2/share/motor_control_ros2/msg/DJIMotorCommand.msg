@@ -1,3 +1,1 @@
-std_msgs/Header header
-string joint_name
-int16 output                   # GM3508: 电流值, GM6020: 电压值
+/home/toe/111/USB2CAN_motor/src/motor_control_ros2/msg/DJIMotorCommand.msg

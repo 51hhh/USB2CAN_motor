@@ -15,10 +15,10 @@ public:
         this->declare_parameter("joy_input_topic", "/cmd_vel_joy");
         this->declare_parameter("remote_input_topic", "/cmd_vel_remote");
         this->declare_parameter("output_topic", "/cmd_vel");
-        this->declare_parameter("active_source", "remote");
+        this->declare_parameter("active_source", "joy");
         this->declare_parameter("source_timeout_sec", 0.5);
-        this->declare_parameter("timeout_mode", "brake");
-        this->declare_parameter("fallback_source", "joy");
+        this->declare_parameter("timeout_mode", "fallback");
+        this->declare_parameter("fallback_source", "remote");
         this->declare_parameter("lock_active_source", false);
 
         joy_input_topic_ = this->get_parameter("joy_input_topic").as_string();
@@ -32,8 +32,8 @@ public:
 
         if (!isValidSource(active_source_)) {
             RCLCPP_WARN(this->get_logger(),
-                "未知 active_source=%s，回退到 remote", active_source_.c_str());
-            active_source_ = "remote";
+                "未知 active_source=%s，回退到 joy", active_source_.c_str());
+            active_source_ = "joy";
         }
 
         if (source_timeout_sec_ < 0.0) {

@@ -56,9 +56,22 @@ ament_target_dependencies(positioning_bridge_node
   rclcpp
 )
 
+add_executable(positioning_monitor_node
+  src/positioning_monitor_node.cpp
+)
+
+target_compile_features(positioning_monitor_node PUBLIC cxx_std_17)
+
+ament_target_dependencies(positioning_monitor_node
+  rclcpp
+  nav_msgs
+  diagnostic_msgs
+)
+
 install(TARGETS
   positioning_bridge_lib
   positioning_bridge_node
+  positioning_monitor_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}

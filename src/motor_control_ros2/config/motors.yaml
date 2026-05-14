@@ -7,7 +7,6 @@ can_interfaces:
         type: GM6020
         id: 1
       
-      
       # 右前舵轮单元
       - name: DJI6020_2          # 右前转向电机
         type: GM6020

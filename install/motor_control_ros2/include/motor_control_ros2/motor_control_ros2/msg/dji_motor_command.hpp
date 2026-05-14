@@ -1,12 +1,1 @@
-// generated from rosidl_generator_cpp/resource/idl.hpp.em
-// generated code does not contain a copyright notice
-
-#ifndef MOTOR_CONTROL_ROS2__MSG__DJI_MOTOR_COMMAND_HPP_
-#define MOTOR_CONTROL_ROS2__MSG__DJI_MOTOR_COMMAND_HPP_
-
-#include "motor_control_ros2/msg/detail/dji_motor_command__struct.hpp"
-#include "motor_control_ros2/msg/detail/dji_motor_command__builder.hpp"
-#include "motor_control_ros2/msg/detail/dji_motor_command__traits.hpp"
-#include "motor_control_ros2/msg/detail/dji_motor_command__type_support.hpp"
-
-#endif  // MOTOR_CONTROL_ROS2__MSG__DJI_MOTOR_COMMAND_HPP_
+/home/toe/111/USB2CAN_motor/build/motor_control_ros2/rosidl_generator_cpp/motor_control_ros2/msg/dji_motor_command.hpp
