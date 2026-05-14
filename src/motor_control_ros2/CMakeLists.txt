@@ -314,6 +314,27 @@ set_target_properties(strike_node PROPERTIES
   INSTALL_RPATH "$ORIGIN"
 )
 
+# C++ 可执行文件 - 发球协调控制节点（Delta臂 + DJI 3508）
+add_executable(serve_controller_node
+  src/nodes/serve_controller_node.cpp
+)
+
+target_link_libraries(serve_controller_node
+  "${cpp_typesupport_target}"
+  yaml-cpp
+)
+
+ament_target_dependencies(serve_controller_node
+  rclcpp
+  std_msgs
+  sensor_msgs
+  ament_index_cpp
+)
+
+set_target_properties(serve_controller_node PROPERTIES
+  INSTALL_RPATH "$ORIGIN"
+)
+
 # C++ 可执行文件 - 风车发球管理器
 add_executable(serve_windmill_manager
   src/nodes/serve_windmill_manager.cpp
@@ -348,6 +369,7 @@ install(TARGETS
   delta_arm_manager
   teach_playback_control_node
   serve_windmill_manager
+  serve_controller_node
   strike_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
