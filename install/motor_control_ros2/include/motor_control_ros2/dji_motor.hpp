@@ -1,1 +1,0 @@
-/home/toe/111/USB2CAN_motor/src/motor_control_ros2/include/motor_control_ros2/dji_motor.hpp

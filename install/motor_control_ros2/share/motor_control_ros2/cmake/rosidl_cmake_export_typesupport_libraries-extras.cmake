@@ -1,1 +1,0 @@
-/home/toe/111/USB2CAN_motor/build/motor_control_ros2/rosidl_cmake/rosidl_cmake_export_typesupport_libraries-extras.cmake

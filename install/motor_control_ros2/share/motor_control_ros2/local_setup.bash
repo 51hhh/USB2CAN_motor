@@ -1,1 +1,0 @@
-/home/toe/111/USB2CAN_motor/build/motor_control_ros2/ament_cmake_environment_hooks/local_setup.bash

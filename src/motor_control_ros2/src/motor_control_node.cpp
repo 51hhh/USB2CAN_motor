@@ -3,6 +3,7 @@
 #include <memory>
 #include <vector>
 #include <map>
+#include <unordered_map>
 #include <thread>
 #include <chrono>
 #include <atomic>
@@ -222,13 +223,48 @@ private:
     motor->setInterfaceName(interface_name);
     motor->setDevicePath(device_path);
 
+    // 保存方向/零位偏移配置（用于状态发布与命令变换）
+    int direction = (config.direction >= 0) ? 1 : -1;
+    unitree_direction_[config.name] = direction;
+    unitree_offset_[config.name] = config.offset;
+
     motors_[config.name] = motor;
     unitree_native_motors_.push_back(motor);
 
     RCLCPP_INFO(this->get_logger(),
-                "添加宇树电机(原生): %s (ID=%d, 齿轮比=%.2f) -> %s",
+                "添加宇树电机(原生): %s (ID=%d, 方向=%d, offset=%.4f rad, 齿轮比=%.2f) -> %s",
                 config.name.c_str(), config.id,
-                config.gear_ratio, interface_name.c_str());
+                direction, config.offset, config.gear_ratio, interface_name.c_str());
+  }
+
+  int getUnitreeDirection(const std::string& joint_name) const {
+    auto it = unitree_direction_.find(joint_name);
+    return (it != unitree_direction_.end()) ? it->second : 1;
+  }
+
+  double getUnitreeOffset(const std::string& joint_name) const {
+    auto it = unitree_offset_.find(joint_name);
+    return (it != unitree_offset_.end()) ? it->second : 0.0;
+  }
+
+  double applyUnitreePosition(const std::string& joint_name, double raw_position) const {
+    // 统一语义：输出位置 = 原始位置 * direction - offset
+    return raw_position * static_cast<double>(getUnitreeDirection(joint_name)) - getUnitreeOffset(joint_name);
+  }
+
+  double applyUnitreeVelocity(const std::string& joint_name, double raw_velocity) const {
+    return raw_velocity * static_cast<double>(getUnitreeDirection(joint_name));
+  }
+
+  double applyUnitreeTorque(const std::string& joint_name, double raw_torque) const {
+    return raw_torque * static_cast<double>(getUnitreeDirection(joint_name));
+  }
+
+  double outputToRawUnitreePosition(const std::string& joint_name, double output_position) const {
+    // 与 applyUnitreePosition 互逆：raw = (output + offset) / direction
+    int dir = getUnitreeDirection(joint_name);
+    double offset = getUnitreeOffset(joint_name);
+    return (output_position + offset) / static_cast<double>(dir);
   }
 
   /**
@@ -254,10 +290,17 @@ private:
     if (motor_type == MotorType::DJI_GM6020 || motor_type == MotorType::DJI_GM3508) {
       auto motor = std::make_shared<DJIMotor>(config.name, motor_type, config.id, 0);
       motor->setInterfaceName(interface_name);  // 设置接口名称
+      motor->setDirection(config.direction);    // 设置方向（对称安装时用-1）
+      motor->setOffset(config.offset);          // 设置零位偏移（弧度）
       motors_[config.name] = motor;
       dji_motors_.push_back(motor);
-      RCLCPP_INFO(this->get_logger(), "添加 DJI 电机: %s (%s, ID=%d) -> %s", 
-                  config.name.c_str(), config.type.c_str(), config.id, interface_name.c_str());
+      if (!config.mirror_from.empty()) {
+        dji_mirror_map_[config.name] = config.mirror_from;
+      }
+      RCLCPP_INFO(this->get_logger(), "添加 DJI 电机: %s (%s, ID=%d, dir=%d, offset=%.4f rad%s) -> %s", 
+                  config.name.c_str(), config.type.c_str(), config.id, config.direction, config.offset,
+                  config.mirror_from.empty() ? "" : (", mirror=" + config.mirror_from).c_str(),
+                  interface_name.c_str());
     } else if (motor_type == MotorType::DAMIAO_DM4340 || motor_type == MotorType::DAMIAO_DM4310) {
       auto motor = std::make_shared<DamiaoMotor>(config.name, motor_type, config.id, 0);
       motor->setInterfaceName(interface_name);  // 设置接口名称
@@ -507,12 +550,17 @@ private:
         }
 
         if (ok) {
+          const std::string joint = motor->getJointName();
+          const double pos = applyUnitreePosition(joint, motor->getOutputPosition());
+          const double vel = applyUnitreeVelocity(joint, motor->getOutputVelocity());
+          const double tor = applyUnitreeTorque(joint, motor->getOutputTorque());
+
           RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
               "[Serial Thread] %s: Pos=%.3f° Vel=%.3f rad/s Tor=%.3f Nm Tmp=%d°C Online=%d",
               motor->getJointName().c_str(),
-              motor->getOutputPosition() * 180.0 / M_PI,
-              motor->getOutputVelocity(),
-              motor->getOutputTorque(),
+              pos * 180.0 / M_PI,
+              vel,
+              tor,
               (int)motor->getTemperature(),
               motor->isOnline() ? 1 : 0);
         }
@@ -609,23 +657,9 @@ private:
                              data[0], data[1], data[2], data[3],
                              data[4], data[5], data[6], data[7]);
         
-        // ========== SendRecv 同步模式 ==========
-        // 发送命令后立即等待反馈（50us + 900us 超时）
-        // 这样可以避免数据堆积，确保 PID 及时响应
-        hardware::CANFrame response;
-        if (can_network_->sendRecv(interface_name, control_id, data, 8, response, 900)) {
-          // 收到反馈，立即更新电机状态
-          // 注意：DJI 电机的反馈 ID 与控制 ID 不同
-          // 反馈会通过 canRxCallback 自动分发到对应电机
-          RCLCPP_DEBUG_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
-                               "[CAN RX] %s 收到反馈 ID: 0x%03X", 
-                               interface_name.c_str(), response.can_id);
-        } else {
-          // 超时，记录警告
-          RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
-                              "[CAN TIMEOUT] %s ID: 0x%03X 未收到反馈", 
-                              interface_name.c_str(), control_id);
-        }
+        // 只发送控制帧，反馈由接收线程统一处理
+        // 避免 sendRecv 与接收线程竞争串口数据导致编码器帧丢失
+        can_network_->send(interface_name, control_id, data, 8);
       }
     }
   }
@@ -674,7 +708,29 @@ private:
       msg.joint_name = motor->getJointName();
       msg.model = (motor->getMotorType() == MotorType::DJI_GM6020) ? "GM6020" : "GM3508";
       msg.online = motor->isOnline();
-      msg.angle = motor->getOutputPosition() * 180.0 / M_PI;
+      // 如果配置了镜像源，使用源电机的角度（方向和偏移仍由自身配置决定）
+      auto mirror_it = dji_mirror_map_.find(motor->getJointName());
+      if (mirror_it != dji_mirror_map_.end()) {
+        auto src_it = motors_.find(mirror_it->second);
+        if (src_it != motors_.end()) {
+          auto src_dji = std::dynamic_pointer_cast<DJIMotor>(src_it->second);
+          if (src_dji) {
+            // 镜像模式：直接使用源电机的角度，应用目标电机的 offset
+            double src_output_rad = src_dji->getOutputPosition();
+            double output_rad = src_output_rad - motor->getOffset();
+            double degrees = output_rad * 180.0 / M_PI;
+            degrees = fmod(degrees, 360.0);
+            if (degrees < 0) degrees += 360.0;
+            msg.angle = degrees;
+          } else {
+            msg.angle = motor->getAngleDegrees();
+          }
+        } else {
+          msg.angle = motor->getAngleDegrees();
+        }
+      } else {
+        msg.angle = motor->getAngleDegrees();
+      }
       msg.rpm = motor->getRPM();
       msg.current = motor->getCurrent();
       msg.temperature = static_cast<uint8_t>(motor->getTemperature());
@@ -706,13 +762,14 @@ private:
     // 发布原生协议宇树电机状态
     for (auto& motor : unitree_native_motors_) {
       auto msg = motor_control_ros2::msg::UnitreeGO8010State();
+      const std::string joint = motor->getJointName();
       msg.header.stamp = now;
-      msg.joint_name = motor->getJointName();
+      msg.joint_name = joint;
       msg.motor_id = motor->getMotorId();
       msg.online = motor->isOnline();
-      msg.position = motor->getOutputPosition();
-      msg.velocity = motor->getOutputVelocity();
-      msg.torque = motor->getOutputTorque();
+      msg.position = applyUnitreePosition(joint, motor->getOutputPosition());
+      msg.velocity = applyUnitreeVelocity(joint, motor->getOutputVelocity());
+      msg.torque = applyUnitreeTorque(joint, motor->getOutputTorque());
       msg.temperature = static_cast<int8_t>(motor->getTemperature());
       msg.error = motor->getErrorCode();
       unitree_go_state_pub_->publish(msg);
@@ -801,8 +858,14 @@ private:
 
       case 1:  // MODE_FOC
         for (auto& native_motor : matched_motors) {
-          native_motor->setFOCCommand(msg->position_target, msg->velocity_target,
-                              msg->kp, msg->kd, msg->torque_ff);
+          const std::string& joint = native_motor->getJointName();
+          const int dir = getUnitreeDirection(joint);
+
+          const double raw_pos = outputToRawUnitreePosition(joint, msg->position_target);
+          const double raw_vel = msg->velocity_target / static_cast<double>(dir);
+          const double raw_tau = msg->torque_ff / static_cast<double>(dir);
+
+          native_motor->setFOCCommand(raw_pos, raw_vel, msg->kp, msg->kd, raw_tau);
         }
         RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
                              "[CMD GO8010 Native] ID=%d FOC: pos=%.2f°, vel=%.2f rad/s, kp=%.2f, kd=%.2f, tau=%.3f",
@@ -1011,6 +1074,7 @@ private:
   std::shared_ptr<hardware::SerialNetwork> serial_network_;  // 原生串口网络
   std::map<std::string, std::shared_ptr<MotorBase>> motors_;
   std::vector<std::shared_ptr<DJIMotor>> dji_motors_;
+  std::map<std::string, std::string> dji_mirror_map_;  // target -> source 镜像映射
   
   rclcpp::TimerBase::SharedPtr control_timer_;
   rclcpp::TimerBase::SharedPtr reconnect_timer_;  // 设备重连定时器
@@ -1047,6 +1111,10 @@ private:
   // 串口通信线程（每个串口接口一个线程，并行收发）
   std::vector<std::thread> serial_comm_threads_;
   std::atomic<bool> serial_running_{false};
+
+  // 宇树电机坐标映射（从 motors.yaml 读取）
+  std::unordered_map<std::string, int> unitree_direction_;
+  std::unordered_map<std::string, double> unitree_offset_;
 };
 
 // 补齐 namespace 闭合

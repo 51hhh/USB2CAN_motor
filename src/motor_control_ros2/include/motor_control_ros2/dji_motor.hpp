@@ -119,15 +119,36 @@ public:
   }
   
   /**
+   * @brief 设置零位偏移（输出轴弧度）
+   */
+  void setOffset(double offset_rad) { offset_rad_ = offset_rad; }
+
+  /**
+   * @brief 获取零位偏移（输出轴弧度）
+   */
+  double getOffset() const { return offset_rad_; }
+
+  /**
+   * @brief 设置方向（1 或 -1）
+   */
+  void setDirection(int dir) { direction_ = (dir >= 0) ? 1 : -1; }
+
+  /**
+   * @brief 获取方向
+   */
+  int getDirection() const { return direction_; }
+
+  /**
    * @brief 获取角度（度，0-360）
    * 
    * 统一接口：GM6020 和 GM3508 都返回输出轴角度（0-360°）
    * - GM6020: 编码器直接读取输出轴角度
    * - GM3508: 累积编码器 / 减速比，归一化到 0-360°
+   * 减去 offset 后归一化
    */
   double getAngleDegrees() const {
-    // 获取输出轴位置（弧度）
-    double output_rad = getOutputPosition();
+    // 获取输出轴位置（弧度），应用方向和零位偏移
+    double output_rad = getOutputPosition() * direction_ - offset_rad_;
     
     // 转换为度
     double degrees = output_rad * 180.0 / M_PI;
@@ -173,6 +194,11 @@ private:
   int32_t encoder_rounds_;     // 累积圈数（电机轴）
   bool first_feedback_;        // 是否是第一次反馈
   
+  // 方向系数（1 或 -1，用于对称安装的电机）
+  int direction_ = 1;
+  // 零位偏移（输出轴弧度）
+  double offset_rad_ = 0.0;
+
   // 串级控制
   CascadeController cascade_controller_;  // 串级控制器
   double position_target_;                // 位置目标（弧度）

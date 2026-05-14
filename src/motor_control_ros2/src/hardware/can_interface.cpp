@@ -352,9 +352,11 @@ bool CANInterface::sendRecv(uint32_t can_id, const uint8_t* data, size_t len,
     
     // 尝试解析帧
     if (parseFrame(response)) {
-      if (isExpectedResponseId(can_id, response.can_id)) {
-        return true;
+      // 先分发给回调，确保电机反馈不丢失
+      if (rx_callback_) {
+        rx_callback_(interface_name_, response.can_id, response.data, response.len);
       }
+      return true;
     }
   }
   

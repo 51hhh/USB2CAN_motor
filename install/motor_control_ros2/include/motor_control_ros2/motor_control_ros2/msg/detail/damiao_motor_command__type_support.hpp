@@ -1,1 +1,0 @@
-/home/toe/111/USB2CAN_motor/build/motor_control_ros2/rosidl_generator_cpp/motor_control_ros2/msg/detail/damiao_motor_command__type_support.hpp

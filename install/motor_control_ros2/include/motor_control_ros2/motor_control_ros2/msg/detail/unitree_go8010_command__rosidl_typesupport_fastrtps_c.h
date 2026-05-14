@@ -1,1 +1,0 @@
-/home/toe/111/USB2CAN_motor/build/motor_control_ros2/rosidl_typesupport_fastrtps_c/motor_control_ros2/msg/detail/unitree_go8010_command__rosidl_typesupport_fastrtps_c.h
