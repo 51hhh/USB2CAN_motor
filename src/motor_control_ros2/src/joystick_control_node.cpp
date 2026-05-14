@@ -231,7 +231,6 @@ void JoystickControlNode::joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg
 
 void JoystickControlNode::publishCmdVel() {
     auto now = this->now();
-    double dt = (now - last_update_time_).seconds();
     last_update_time_ = now;
     
     // 检查手柄超时
@@ -248,16 +247,10 @@ void JoystickControlNode::publishCmdVel() {
         target_vx_ = target_vy_ = target_wz_ = 0.0;
     }
     
-    // 应用加速度限制（平滑控制）
-    if (dt > 0.0 && dt < 1.0) {
-        current_vx_ = rateLimit(current_vx_, target_vx_, accel_limit_, dt);
-        current_vy_ = rateLimit(current_vy_, target_vy_, accel_limit_, dt);
-        current_wz_ = rateLimit(current_wz_, target_wz_, angular_accel_limit_, dt);
-    } else {
-        current_vx_ = target_vx_;
-        current_vy_ = target_vy_;
-        current_wz_ = target_wz_;
-    }
+    // 直接使用目标速度（无加速度限制，PID 自身有力矩限幅）
+    current_vx_ = target_vx_;
+    current_vy_ = target_vy_;
+    current_wz_ = target_wz_;
     
     // 发布速度命令
     auto cmd_msg = geometry_msgs::msg::Twist();

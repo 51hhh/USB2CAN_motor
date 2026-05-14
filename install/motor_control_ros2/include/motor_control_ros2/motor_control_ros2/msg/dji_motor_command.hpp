@@ -7,6 +7,5 @@
 #include "motor_control_ros2/msg/detail/dji_motor_command__struct.hpp"
 #include "motor_control_ros2/msg/detail/dji_motor_command__builder.hpp"
 #include "motor_control_ros2/msg/detail/dji_motor_command__traits.hpp"
-#include "motor_control_ros2/msg/detail/dji_motor_command__type_support.hpp"
 
 #endif  // MOTOR_CONTROL_ROS2__MSG__DJI_MOTOR_COMMAND_HPP_

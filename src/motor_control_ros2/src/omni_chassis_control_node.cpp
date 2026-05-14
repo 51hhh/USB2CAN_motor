@@ -55,10 +55,6 @@ public:
             RCLCPP_WARN(this->get_logger(), "cmd_timeout=%.3f 非法，回退到 0.5", cmd_timeout_);
             cmd_timeout_ = 0.5;
         }
-        if (velocity_filter_alpha_ < 0.0 || velocity_filter_alpha_ > 1.0) {
-            RCLCPP_WARN(this->get_logger(), "velocity_filter_alpha=%.3f 非法，回退到 0.3", velocity_filter_alpha_);
-            velocity_filter_alpha_ = 0.3;
-        }
         
         // 初始化运动学
         kinematics_ = std::make_unique<OmniWheelKinematics>(
@@ -163,8 +159,6 @@ private:
         loadDouble("max_linear_velocity", max_linear_velocity_);
         loadDouble("max_angular_velocity", max_angular_velocity_);
         loadDouble("cmd_timeout", cmd_timeout_);
-        loadDouble("velocity_filter_alpha", velocity_filter_alpha_);
-
         loadString("fl_motor", motor_names_[0]);
         loadString("fr_motor", motor_names_[1]);
         loadString("rl_motor", motor_names_[2]);
@@ -181,20 +175,9 @@ private:
     // 底盘速度命令回调
     void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
         // 限制速度
-        double raw_vx = std::clamp(msg->linear.x, -max_linear_velocity_, max_linear_velocity_);
-        double raw_vy = std::clamp(msg->linear.y, -max_linear_velocity_, max_linear_velocity_);
-        double raw_wz = std::clamp(msg->angular.z, -max_angular_velocity_, max_angular_velocity_);
-        
-        // 应用低通滤波（平滑速度变化）
-        // filtered = alpha * new + (1 - alpha) * old
-        filtered_vx_ = velocity_filter_alpha_ * raw_vx + (1.0 - velocity_filter_alpha_) * filtered_vx_;
-        filtered_vy_ = velocity_filter_alpha_ * raw_vy + (1.0 - velocity_filter_alpha_) * filtered_vy_;
-        filtered_wz_ = velocity_filter_alpha_ * raw_wz + (1.0 - velocity_filter_alpha_) * filtered_wz_;
-        
-        // 使用滤波后的速度
-        cmd_vx_ = filtered_vx_;
-        cmd_vy_ = filtered_vy_;
-        cmd_wz_ = filtered_wz_;
+        cmd_vx_ = std::clamp(msg->linear.x, -max_linear_velocity_, max_linear_velocity_);
+        cmd_vy_ = std::clamp(msg->linear.y, -max_linear_velocity_, max_linear_velocity_);
+        cmd_wz_ = std::clamp(msg->angular.z, -max_angular_velocity_, max_angular_velocity_);
         
         last_cmd_time_ = this->now();
     }
@@ -214,10 +197,6 @@ private:
             cmd_vx_ = 0.0;
             cmd_vy_ = 0.0;
             cmd_wz_ = 0.0;
-            // 清零滤波器状态
-            filtered_vx_ = 0.0;
-            filtered_vy_ = 0.0;
-            filtered_wz_ = 0.0;
         }
         
         // 逆运动学解算：底盘速度 → 4 个轮子速度
@@ -361,14 +340,6 @@ private:
     double max_linear_velocity_ {2.0};
     double max_angular_velocity_ {3.14};
     double cmd_timeout_ {0.5};
-    
-    // 速度平滑滤波参数
-    double velocity_filter_alpha_ {0.3};  // 低通滤波系数 [0, 1]，越小越平滑
-    
-    // 上一次的滤波速度（用于低通滤波）
-    double filtered_vx_ = 0.0;
-    double filtered_vy_ = 0.0;
-    double filtered_wz_ = 0.0;
     
     // 底盘速度命令
     double cmd_vx_ = 0.0;

@@ -4,13 +4,13 @@
 # 机械结构参数
 structure:
   # 肩关节高度（米）- 电机固定高度
-  shoulder_height: 0.50
+  shoulder_height: 0.55
   
   # 大臂长度（米）- 肩关节到肘关节
-  upper_arm_length: 0.35
+  upper_arm_length: 0.20
   
   # 小臂长度（米）- 肘关节到击球板（被动关节）
-  forearm_length: 0.30
+  forearm_length: 0.22
   
   # 击球板高度（米）- 从小臂末端到击球板中心
   strike_plate_height: 0.10
@@ -20,10 +20,10 @@ structure:
   strike_angle_max: 60.0
   
   # 最大角速度（rad/s）- 击球速度上限
-  max_velocity: 5.0
+  max_velocity: 1.0
   
   # 最大力矩（Nm）- 单个电机最大输出
-  max_torque: 12.0
+  max_torque: 1.0
 
 # 控制参数
 control:
@@ -54,7 +54,7 @@ safety:
   enable_sync_check: true
   
   # 关节速度突变阈值（rad/s）- 超过阈值触发紧急停止
-  velocity_spike_threshold: 15.0
+  velocity_spike_threshold: 5.0
   
   # 关节温度报警阈值（℃）
   temperature_warning: 60
@@ -75,10 +75,10 @@ trajectory:
   smoothing_time: 0.3
   
   # 最大加速度（rad/s²）
-  max_acceleration: 20.0
+  max_acceleration: 1.0
   
   # 最大加加速度（rad/s³）
-  max_jerk: 100.0
+  max_jerk: 1.0
 
 # 重力补偿参数（用于力矩前馈）
 gravity_compensation:
