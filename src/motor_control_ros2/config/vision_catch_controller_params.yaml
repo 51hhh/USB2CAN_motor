@@ -1,12 +1,17 @@
 vision_catch_controller_node:
   ros__parameters:
     goal_topic: "/auto/goal_pose"
-    odom_topic: "/odom"
+    odom_topic: "/odom_wheels"
     cmd_vel_topic: "/cmd_vel_remote"
     goal_frame: "vision_world"
     control_frequency: 50.0
-    approach_gain: 1.0
-    max_linear_speed: 1.0
-    position_tolerance: 0.05
-    goal_timeout_sec: 1.0
-    odom_timeout_sec: 0.5
+    approach_gain: 1.0  #比例
+    max_linear_speed: 1.0  #最大线速度
+    position_tolerance: 0.05  #位置容差
+    goal_timeout_sec: 1.0  #目标超时
+    odom_timeout_sec: 0.5  #里程计超时
+    yaw_hold_enabled: true      # 是否保持车头方向
+    use_goal_yaw: false         # false: 保持启动后首次 /odom 的 yaw; true: 使用 /auto/goal_pose.orientation
+    yaw_kp: 1.5                 # yaw 保持 P 增益
+    max_angular_speed: 0.1      # yaw 修正角速度上限(rad/s)，还会被底盘 max_angular_velocity 再限幅
+    yaw_tolerance_rad: 0.03     # yaw 误差死区(rad)

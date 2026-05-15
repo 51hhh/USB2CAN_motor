@@ -4,6 +4,9 @@ omni_chassis_control_node:
   ros__parameters:
     # 控制频率
     control_frequency: 100.0        # Hz
+
+    # 底盘速度输入 topic（通常接 cmd_vel_mux_node 的 output_topic）
+    cmd_vel_topic: "/cmd_vel"
     
     # 底盘机械参数
     wheel_base_x: 0.88              # 前后轮距 (m)
