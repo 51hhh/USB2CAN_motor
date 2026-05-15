@@ -345,6 +345,7 @@ private:
     double max_linear_velocity_ {2.0};
     double max_angular_velocity_ {3.14};
     double cmd_timeout_ {0.5};
+    double velocity_filter_alpha_ {1.0};
     
     // 底盘速度命令
     double cmd_vx_ = 0.0;
