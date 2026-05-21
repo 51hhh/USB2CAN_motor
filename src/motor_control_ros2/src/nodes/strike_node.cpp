@@ -47,6 +47,10 @@
 #include <atomic>
 #include <mutex>
 #include <chrono>
+#include <thread>
+#include <termios.h>
+#include <unistd.h>
+#include <poll.h>
 
 namespace motor_control {
 
@@ -90,6 +94,7 @@ struct StrikeProfile {
     double      strike_timeout  {3.0};   // 击打超时保护 (s)
     double      brake_duration  {1.0};   // 刹停持续时间 (s)
     double      return_time     {1.5};   // 回蓄力插值时间 (s)
+    double      sub_arm_delay_rad {0.0}; // 小臂延迟启动阈值 (rad)：大臂到达此位置后小臂开始击打，0=同时启动
 };
 
 // ── 状态机 ───────────────────────────────────────────────────
@@ -144,6 +149,17 @@ public:
             "strike_node 启动 | %.0f Hz | %zu 套击球方案 | 默认方案: %s",
             control_hz_, profiles_.size(), active_profile_name_.c_str());
         printProfiles();
+
+        // 启动键盘监听线程（终端原始模式，非阻塞）
+        kbd_running_.store(true);
+        kbd_thread_ = std::thread([this]() { keyboardLoop(); });
+        RCLCPP_INFO(get_logger(),
+            "键盘控制已启用: 1=center 2=left 3=right 4=strong  空格/Enter=触发  q=退出");
+    }
+
+    ~StrikeNode() {
+        kbd_running_.store(false);
+        if (kbd_thread_.joinable()) kbd_thread_.join();
     }
 
 private:
@@ -209,10 +225,11 @@ private:
             for (const auto& prof_node : p["profiles"]) {
                 StrikeProfile prof;
                 prof.name = prof_node["name"].as<std::string>();
-                if (prof_node["trigger_deg"])    prof.trigger_rad    = deg2rad(prof_node["trigger_deg"].as<double>());
-                if (prof_node["strike_timeout"]) prof.strike_timeout = prof_node["strike_timeout"].as<double>();
-                if (prof_node["brake_duration"]) prof.brake_duration = prof_node["brake_duration"].as<double>();
-                if (prof_node["return_time"])    prof.return_time    = prof_node["return_time"].as<double>();
+                if (prof_node["trigger_deg"])      prof.trigger_rad       = deg2rad(prof_node["trigger_deg"].as<double>());
+                if (prof_node["sub_arm_delay_deg"]) prof.sub_arm_delay_rad = deg2rad(prof_node["sub_arm_delay_deg"].as<double>());
+                if (prof_node["strike_timeout"])   prof.strike_timeout    = prof_node["strike_timeout"].as<double>();
+                if (prof_node["brake_duration"])   prof.brake_duration    = prof_node["brake_duration"].as<double>();
+                if (prof_node["return_time"])      prof.return_time       = prof_node["return_time"].as<double>();
                 loadPhase(prof_node["ready"],  prof.ready);
                 loadPhase(prof_node["strike"], prof.strike);
                 loadPhase(prof_node["brake"],  prof.brake);
@@ -254,14 +271,16 @@ private:
         center.brake_duration = 1.0;
         center.return_time    = 1.5;
 
-        center.ready.main = { deg2rad(30.0), 0.0, 0.0, 0.5, 0.1 };
+        center.ready.main = { deg2rad(0.0), 0.0, 0.0, 0.5, 0.1 };
         center.ready.sub  = { deg2rad(0.0),  0.0, 0.0, 0.5, 0.1 };
 
-        center.strike.main = { 0.0, 9.0, 0.5, 0.0, 0.1 };
-        center.strike.sub  = { 0.0, 7.5, 0.5, 0.0, 0.1 };
+        center.strike.main = { 0.0, 2.0, 0.5, 0.0, 0.1 };
+        center.strike.sub  = { 0.0, 4.0, 0.5, 0.0, 0.1 };
 
         center.brake.main = { 0.0, 0.0, 0.0, 0.0, 0.1 };
         center.brake.sub  = { 0.0, 0.0, 0.0, 0.0, 0.1 };
+        // 大臂到达 30° 后小臂跟上
+        center.sub_arm_delay_rad = deg2rad(40.0);
 
         profiles_["center"] = center;
 
@@ -312,6 +331,59 @@ private:
         s.torque   = msg->torque;
         s.online   = msg->online;
         motor_states_[msg->motor_id] = s;
+    }
+
+    // ── 键盘监听（独立线程，termios 原始模式）────────────────────
+    void keyboardLoop() {
+        if (!isatty(STDIN_FILENO)) {
+            RCLCPP_WARN(get_logger(),
+                "[键盘] stdin 不是终端（可能被重定向），键盘控制不可用\n"
+                "  请在前台终端直接运行节点，不要用 nohup/后台方式启动");
+            return;
+        }
+        struct termios orig_termios, raw;
+        if (tcgetattr(STDIN_FILENO, &orig_termios) < 0) {
+            RCLCPP_WARN(get_logger(), "[键盘] tcgetattr 失败，键盘控制不可用");
+            return;
+        }
+        raw = orig_termios;
+        raw.c_lflag &= ~(ICANON | ECHO);
+        raw.c_cc[VMIN]  = 0;
+        raw.c_cc[VTIME] = 0;
+        tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+
+        const std::map<int, std::string> key_profile_map {
+            {'1', "center"}, {'2', "left"}, {'3', "right"}, {'4', "strong"}
+        };
+
+        RCLCPP_INFO(get_logger(),
+            "[键盘] 线程已启动\n"
+            "  1=center  2=left  3=right  4=strong\n"
+            "  空格/Enter=触发击打   q=退出");
+
+        while (kbd_running_.load()) {
+            struct pollfd pfd { STDIN_FILENO, POLLIN, 0 };
+            int ret = poll(&pfd, 1, 50);
+            if (ret <= 0) continue;
+
+            char c = 0;
+            if (read(STDIN_FILENO, &c, 1) != 1) continue;
+
+            auto it = key_profile_map.find(static_cast<int>(c));
+            if (it != key_profile_map.end()) {
+                selectProfile(it->second, "键盘");
+            } else if (c == ' ' || c == '\n' || c == '\r') {
+                lb_pressed_.store(true);
+                RCLCPP_INFO(get_logger(), "[键盘] 触发 (当前方案: %s)",
+                    active_profile_name_.c_str());
+            } else if (c == 'q' || c == 'Q') {
+                RCLCPP_INFO(get_logger(), "[键盘] q → 退出");
+                rclcpp::shutdown();
+                break;
+            }
+        }
+        tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios);
+        RCLCPP_INFO(get_logger(), "[键盘] 线程已退出");
     }
 
     void joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg) {
@@ -401,7 +473,7 @@ private:
                 break;
 
             case StrikeState::STRIKE_ACCEL:
-                holdPhase(activeProfile().strike);
+                updateStrikeAccel();
                 checkStrikeTrigger();
                 break;
 
@@ -462,9 +534,56 @@ private:
     }
 
     void startStrike() {
+        const auto& prof = activeProfile();
         state_ = StrikeState::STRIKE_ACCEL;
         state_start_ = now_sec();
-        sendPhase(activeProfile().strike);
+        sub_arm_started_ = (prof.sub_arm_delay_rad <= 0.0);
+        // 大臂立即开始，小臂按 sub_arm_delay_rad 决定是否同时启动
+        const auto& m = prof.strike.main;
+        for (const auto* motor : {&motor_l1_, &motor_r1_}) {
+            sendFoc(*motor, m.pos, m.vel, m.torque_ff, m.kp, m.kd);
+        }
+        if (sub_arm_started_) {
+            const auto& s = prof.strike.sub;
+            for (const auto* motor : {&motor_l2_, &motor_r2_}) {
+                sendFoc(*motor, s.pos, s.vel, s.torque_ff, s.kp, s.kd);
+            }
+        } else {
+            // 小臂保持蓄力位
+            const auto& s = prof.ready.sub;
+            for (const auto* motor : {&motor_l2_, &motor_r2_}) {
+                sendFoc(*motor, s.pos, 0.0, 0.0, s.kp, s.kd);
+            }
+        }
+    }
+
+    // 击打加速阶段：大臂先走，到达 sub_arm_delay_rad 后小臂跟上
+    void updateStrikeAccel() {
+        const auto& prof = activeProfile();
+        const auto& m = prof.strike.main;
+        double main_pos = avgPos(MOTOR_L1_ID, MOTOR_R1_ID);
+
+        if (!sub_arm_started_ && main_pos >= prof.sub_arm_delay_rad) {
+            sub_arm_started_ = true;
+            RCLCPP_INFO(get_logger(), "大臂到达 %.1f°，小臂开始击打",
+                rad2deg(main_pos));
+        }
+
+        for (const auto* motor : {&motor_l1_, &motor_r1_}) {
+            sendFoc(*motor, m.pos, m.vel, m.torque_ff, m.kp, m.kd);
+        }
+        if (sub_arm_started_) {
+            const auto& s = prof.strike.sub;
+            for (const auto* motor : {&motor_l2_, &motor_r2_}) {
+                sendFoc(*motor, s.pos, s.vel, s.torque_ff, s.kp, s.kd);
+            }
+        } else {
+            // 小臂等待：保持蓄力位
+            const auto& s = prof.ready.sub;
+            for (const auto* motor : {&motor_l2_, &motor_r2_}) {
+                sendFoc(*motor, s.pos, 0.0, 0.0, s.kp, s.kd);
+            }
+        }
     }
 
     void checkStrikeTrigger() {
@@ -701,11 +820,17 @@ private:
     double landing_x_    {0.0};
     double vision_stamp_ {-1.0};
 
+    // 击打阶段小臂延迟状态
+    bool sub_arm_started_ {false};
+
     // 手柄
     std::atomic<bool> lb_pressed_ {false};
     int lb_prev_ {0};
     // 红外触发
     std::atomic<bool> ir_triggered_ {false};
+    // 键盘监听线程
+    std::thread kbd_thread_;
+    std::atomic<bool> kbd_running_ {false};
 
     // ROS
     rclcpp::Publisher<UnitreeCmd>::SharedPtr cmd_pub_;
