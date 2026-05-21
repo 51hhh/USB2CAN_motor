@@ -23,7 +23,8 @@ strike_node:
 
     # 重力补偿参数
     gravity_tau_inner: 8.0      # 大臂输出端重力矩 (Nm)
-    gravity_tau_outer: 3.0      # 小臂输出端重力矩 (Nm)
+    gravity_tau_outer: 3.5
+          # 小臂输出端重力矩 (Nm)
     gear_ratio: 6.33            # 减速比
     gravity_offset_rad: -1.5708 # π/2，水平为0参考 (rad)
 
@@ -63,19 +64,20 @@ strike_node:
       # ── 正面击球（默认）─────────────────────────────────────────
       - name: "center"
         trigger_deg: 110.0       # 大臂到达此角度 → 切换刹停
+        sub_arm_delay_deg: 25.0  # 大臂到达此角度后小臂开始击打 (0=同时)
         strike_timeout: 3.0      # 击打最大保护时间 (s)
         brake_duration: 1.0      # 刹停持续时间 (s)
         return_time: 1.5         # smoothstep 回蓄力时间 (s)
 
         ready:
           main:                  # 大臂 (ID 0, 2)
-            pos_deg: 30.0        # 蓄力位置 (°)
+            pos_deg: 10.0        # 蓄力位置 (°)
             vel: 0.0
             torque_ff: 0.0
             kp: 0.5
             kd: 0.1
           sub:                   # 小臂 (ID 1, 3)
-            pos_deg: 0.0
+            pos_deg: 10.0
             vel: 0.0
             torque_ff: 0.0
             kp: 0.5
@@ -84,13 +86,13 @@ strike_node:
         strike:
           main:                  # kp=0 纯速度模式
             pos_deg: 0.0
-            vel: 9.0             # 目标速度 (rad/s)
+            vel: 7.0            # 目标速度 (rad/s)
             torque_ff: 0.5       # 额外加速前馈 (Nm)
             kp: 0.0
             kd: 0.1
           sub:
             pos_deg: 0.0
-            vel: 7.5
+            vel: 7.0
             torque_ff: 0.5
             kp: 0.0
             kd: 0.1
@@ -133,13 +135,13 @@ strike_node:
         strike:
           main:
             pos_deg: 0.0
-            vel: 9.5             # 速度更快
+            vel: 0.0             # 速度更快
             torque_ff: 0.6
             kp: 0.0
             kd: 0.1
           sub:
             pos_deg: 0.0
-            vel: 8.0
+            vel: 0.0
             torque_ff: 0.6
             kp: 0.0
             kd: 0.1
@@ -182,13 +184,13 @@ strike_node:
         strike:
           main:
             pos_deg: 0.0
-            vel: 8.5             # 速度适中
+            vel: 0.0             # 速度适中
             torque_ff: 0.4
             kp: 0.0
             kd: 0.1
           sub:
             pos_deg: 0.0
-            vel: 7.0
+            vel: 0.0
             torque_ff: 0.4
             kp: 0.0
             kd: 0.1
@@ -231,13 +233,13 @@ strike_node:
         strike:
           main:
             pos_deg: 0.0
-            vel: 10.5
+            vel: 0.0
             torque_ff: 0.8
             kp: 0.0
             kd: 0.1
           sub:
             pos_deg: 0.0
-            vel: 9.0
+            vel: 0.0
             torque_ff: 0.8
             kp: 0.0
             kd: 0.1

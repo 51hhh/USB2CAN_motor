@@ -42,7 +42,7 @@ serial_interfaces:
     type: GO8010
     id: 0
     direction: -1
-    offset: -0.356899
+    offset: -0.331454
     gear_ratio: 6.33
     k_pos: 0.01
     k_spd: 0.005
@@ -50,7 +50,7 @@ serial_interfaces:
     type: GO8010
     id: 1
     direction: 1
-    offset: 0.695865
+    offset: 0.644823
     gear_ratio: 6.33
     k_pos: 0.01
     k_spd: 0.005
@@ -62,7 +62,7 @@ serial_interfaces:
     type: GO8010
     id: 2
     direction: 1
-    offset: 0.765476
+    offset: 0.776411
     gear_ratio: 6.33
     k_pos: 0.01
     k_spd: 0.005
@@ -70,7 +70,7 @@ serial_interfaces:
     type: GO8010
     id: 3
     direction: -1
-    offset: -0.891823
+    offset: -0.965796
     gear_ratio: 6.33
     k_pos: 0.01
     k_spd: 0.005
