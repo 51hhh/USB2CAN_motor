@@ -1,1 +1,0 @@
-/home/rosemaryrabbit/USB2CAN_motor/src/motor_control_ros2/msg/DamiaoMotorCommand.msg

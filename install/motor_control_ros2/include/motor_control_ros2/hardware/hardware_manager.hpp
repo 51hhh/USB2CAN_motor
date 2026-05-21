@@ -1,1 +1,0 @@
-/home/rosemaryrabbit/USB2CAN_motor/src/motor_control_ros2/include/motor_control_ros2/hardware/hardware_manager.hpp

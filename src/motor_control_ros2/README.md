@@ -167,6 +167,30 @@ velocity_pid:
 - 复用节点：`cmd_vel_mux_node`
 - 底盘最终输入：`/cmd_vel`
 
+当前普通手动链路：
+
+```text
+/joy
+  -> joystick_control_node
+  -> /cmd_vel_joy
+  -> cmd_vel_mux_node(active_source=joy)
+  -> /cmd_vel
+  -> omni_chassis_control_node(cmd_vel_topic=/cmd_vel)
+  -> /dji_motor_command_advanced
+```
+
+当前自动/视觉链路：
+
+```text
+/auto/goal_pose + /odom
+  -> vision_catch_controller_node
+  -> /cmd_vel_remote
+  -> cmd_vel_mux_node(active_source=remote)
+  -> /cmd_vel
+  -> omni_chassis_control_node(cmd_vel_topic=/cmd_vel)
+  -> /dji_motor_command_advanced
+```
+
 `cmd_vel_mux_node` 支持参数：
 
 | 参数名 | 默认值 | 说明 |
@@ -174,11 +198,18 @@ velocity_pid:
 | `joy_input_topic` | `/cmd_vel_joy` | 手动源输入 |
 | `remote_input_topic` | `/cmd_vel_remote` | 自动源输入 |
 | `output_topic` | `/cmd_vel` | 转发输出 |
-| `active_source` | `remote` | 当前生效源（`joy` 或 `remote`） |
+| `active_source` | `joy` | 当前生效源（`joy` 或 `remote`） |
 | `source_timeout_sec` | `0.5` | 活动源超时阈值（秒）；`<=0` 表示关闭超时保护 |
 | `timeout_mode` | `brake` | 超时策略：`brake`（刹停）或 `fallback`（回退到备用源） |
 | `fallback_source` | `joy` | `timeout_mode=fallback` 时的回退目标源 |
 | `lock_active_source` | `false` | `true` 时禁止运行时切换控制源（自动模式锁定） |
+
+底盘控制节点也支持通过 YAML 配置速度输入 topic：
+
+| 节点 | 参数名 | 默认值 | 说明 |
+|------|------|------|------|
+| `omni_chassis_control_node` | `cmd_vel_topic` | `/cmd_vel` | X 形全向轮底盘速度输入 |
+| `chassis_control_node` | `cmd_vel_topic` | `/cmd_vel` | 舵轮底盘速度输入 |
 
 ### 运行时切换
 
@@ -199,6 +230,18 @@ velocity_pid:
 - `timeout_mode=fallback`：若 `fallback_source` 有新鲜命令，则自动切源并继续控制；否则刹停
 
 自动控制锁定建议配置：`config/cmd_vel_mux_auto_params.yaml`。
+
+### 增加其他手柄、遥控或底盘
+
+建议遵循“输入源各发各的，mux 统一选择，底盘只吃 mux 输出”的规则：
+
+1. 新增一个手柄或遥控源时，让它发布到独立 topic，例如 `/cmd_vel_joy2`、`/cmd_vel_remote2`；
+2. 若仍只需要两路切换，把 `cmd_vel_mux_node` 的 `joy_input_topic` 或 `remote_input_topic` 改成新 topic；
+3. 若同一时间要在三路及以上来源之间切换，当前 `cmd_vel_mux_node` 只支持 `joy` / `remote` 两路，需要扩展 mux 代码或再串一级 mux；
+4. 新增一个底盘时，不要让两个底盘同时订阅同一个 `/cmd_vel`，应给每个底盘独立输出，例如 `/omni/cmd_vel`、`/steer/cmd_vel`；
+5. 对应把 mux 的 `output_topic` 和目标底盘 YAML 中的 `cmd_vel_topic` 配成同一个值。
+
+示例：若给全向轮单独使用 `/omni/cmd_vel`，则 mux 配置：`output_topic: "/omni/cmd_vel"`，同时 `omni_chassis_params.yaml` 配置：`cmd_vel_topic: "/omni/cmd_vel"`。
 
 ### 联调检查项
 

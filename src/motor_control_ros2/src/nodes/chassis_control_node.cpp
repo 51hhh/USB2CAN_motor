@@ -22,7 +22,7 @@ namespace motor_control {
  * @brief 底盘控制节点
  * 
  * 功能：
- * - 订阅底盘速度命令 (/cmd_vel)
+ * - 订阅底盘速度命令（默认 /cmd_vel，可由配置文件修改）
  * - 运动学逆解算 → 4 个舵轮命令
  * - 发布 DJI 电机控制命令
  * - 从电机反馈计算里程计
@@ -63,7 +63,7 @@ public:
         
         // 创建订阅者
         cmd_vel_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
-            "/cmd_vel", 10,
+            cmd_vel_topic_, 10,
             std::bind(&ChassisControlNode::cmdVelCallback, this, std::placeholders::_1)
         );
         
@@ -89,6 +89,7 @@ public:
         );
         
         RCLCPP_INFO(this->get_logger(), "底盘控制循环启动 - 频率: %.1f Hz", control_frequency_);
+        RCLCPP_INFO(this->get_logger(), "底盘速度输入: %s", cmd_vel_topic_.c_str());
     }
 
 private:
@@ -401,6 +402,10 @@ private:
             throw std::runtime_error("配置文件缺少必需参数: max_angular_velocity");
         }
         max_angular_velocity_ = params["max_angular_velocity"].as<double>();
+
+        if (params["cmd_vel_topic"]) {
+            cmd_vel_topic_ = params["cmd_vel_topic"].as<std::string>();
+        }
         
         // 读取电机映射和配置 - 左前
         if (!params["fl_steer_motor"]) throw std::runtime_error("配置文件缺少必需参数: fl_steer_motor");
@@ -484,6 +489,7 @@ private:
     double wheel_radius_;
     double max_linear_velocity_;
     double max_angular_velocity_;
+    std::string cmd_vel_topic_ {"/cmd_vel"};
     
     // 底盘速度命令
     double cmd_vx_ = 0.0;
