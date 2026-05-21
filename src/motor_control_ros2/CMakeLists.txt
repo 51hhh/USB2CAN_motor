@@ -52,18 +52,15 @@ add_library(motor_control_lib
   # 硬件层
   src/hardware/can_interface.cpp
   src/hardware/serial_interface.cpp
- 
   # 电机驱动层
-  src/dji_motor.cpp
-  src/damiao_motor.cpp
-  
-  src/unitree_motor_native.cpp  # 原生协议宇树电机（主要使用）
+  src/motors/dji_motor.cpp
+  src/motors/damiao_motor.cpp
+  src/motors/unitree_motor_native.cpp
   # 配置解析
-  src/config_parser.cpp
+  src/hardware/config_parser.cpp
   # 运动学
-  src/steer_wheel_kinematics.cpp
-  src/omni_wheel_kinematics.cpp
-  src/parallel_arm_kinematics.cpp
+  src/kinematics/steer_wheel_kinematics.cpp
+  src/kinematics/omni_wheel_kinematics.cpp
 )
 
 # 为库添加依赖
@@ -96,7 +93,7 @@ set_target_properties(motor_control_lib PROPERTIES
 
 # C++ 可执行文件 - 实时控制节点
 add_executable(motor_control_node
-  src/motor_control_node.cpp
+  src/nodes/motor_control_node.cpp
 )
 
 # 链接核心库（不依赖SDK）
@@ -118,7 +115,7 @@ set_target_properties(motor_control_node PROPERTIES
 
 # C++ 可执行文件 - 电机监控节点
 add_executable(motor_monitor_node
-  src/motor_monitor_node.cpp
+  src/nodes/motor_monitor_node.cpp
 )
 
 # 链接核心库（不依赖SDK）
@@ -140,7 +137,7 @@ ament_target_dependencies(motor_monitor_node
 
 # C++ 可执行文件 - 底盘控制节点
 add_executable(chassis_control_node
-  src/chassis_control_node.cpp
+  src/nodes/chassis_control_node.cpp
 )
 
 # 链接核心库（不依赖SDK）
@@ -162,7 +159,7 @@ ament_target_dependencies(chassis_control_node
 
 # C++ 可执行文件 - 全向轮底盘控制节点
 add_executable(omni_chassis_control_node
-  src/omni_chassis_control_node.cpp
+  src/nodes/omni_chassis_control_node.cpp
 )
 
 # 链接核心库（不依赖SDK）
@@ -188,7 +185,7 @@ ament_target_dependencies(omni_chassis_control_node
 
 # C++ 可执行文件 - 手柄控制节点
 add_executable(joystick_control_node
-  src/joystick_control_node.cpp
+  src/nodes/joystick_control_node.cpp
 )
 
 # 链接消息类型支持
@@ -205,7 +202,7 @@ ament_target_dependencies(joystick_control_node
 
 # C++ 可执行文件 - 遥控器控制节点（舵轮）
 add_executable(remote_control_node
-  src/remote_control_node.cpp
+  src/nodes/remote_control_node.cpp
 )
 
 # 链接消息类型支持
@@ -224,7 +221,7 @@ ament_target_dependencies(remote_control_node
 
 # C++ 可执行文件 - cmd_vel 源选择节点
 add_executable(cmd_vel_mux_node
-  src/cmd_vel_mux_node.cpp
+  src/nodes/cmd_vel_mux_node.cpp
 )
 
 ament_target_dependencies(cmd_vel_mux_node
@@ -234,7 +231,7 @@ ament_target_dependencies(cmd_vel_mux_node
 
 # C++ 可执行文件 - 视觉接球目标控制节点
 add_executable(vision_catch_controller_node
-  src/vision_catch_controller_node.cpp
+  src/nodes/vision_catch_controller_node.cpp
 )
 
 target_link_libraries(vision_catch_controller_node
@@ -250,7 +247,7 @@ ament_target_dependencies(vision_catch_controller_node
 
 # C++ 可执行文件 - Delta 机械臂管理器
 add_executable(delta_arm_manager
-  src/delta_arm_manager_node.cpp
+  src/nodes/delta_arm_manager_node.cpp
 )
 
 # 链接核心库和消息类型支持
@@ -275,7 +272,7 @@ set_target_properties(delta_arm_manager PROPERTIES
 find_package(nlohmann_json REQUIRED)
 
 add_executable(teach_playback_control_node
-  src/teach_playback_control_node.cpp
+  src/nodes/teach_playback_control_node.cpp
 )
 
 target_link_libraries(teach_playback_control_node
@@ -293,51 +290,54 @@ set_target_properties(teach_playback_control_node PROPERTIES
   INSTALL_RPATH "$ORIGIN"
 )
 
-# C++ 可执行文件 - 双臂并联平面机构控制节点
-add_executable(parallel_arm_control_node
-  src/parallel_arm_control_node.cpp
+# Note: parallel_arm_control_node 和 volleyball_strike_manager 已删除
+
+# C++ 可执行文件 - 击球控制节点
+add_executable(strike_node
+  src/nodes/strike_node.cpp
 )
 
-target_link_libraries(parallel_arm_control_node
-  motor_control_lib
+target_link_libraries(strike_node
   "${cpp_typesupport_target}"
+  yaml-cpp
 )
 
-ament_target_dependencies(parallel_arm_control_node
+ament_target_dependencies(strike_node
   rclcpp
   std_msgs
-)
-
-set_target_properties(parallel_arm_control_node PROPERTIES
-  INSTALL_RPATH "$ORIGIN"
-)
-
-# C++ 可执行文件 - 排球击球管理器
-add_executable(volleyball_strike_manager
-  src/volleyball_strike_manager.cpp
-)
-
-# 链接核心库和消息类型支持
-target_link_libraries(volleyball_strike_manager
-  motor_control_lib
-  "${cpp_typesupport_target}"
-)
-
-ament_target_dependencies(volleyball_strike_manager
-  rclcpp
-  std_msgs
+  sensor_msgs
   geometry_msgs
   ament_index_cpp
 )
 
-# 设置 RPATH
-set_target_properties(volleyball_strike_manager PROPERTIES
+set_target_properties(strike_node PROPERTIES
+  INSTALL_RPATH "$ORIGIN"
+)
+
+# C++ 可执行文件 - 发球协调控制节点（Delta臂 + DJI 3508）
+add_executable(serve_controller_node
+  src/nodes/serve_controller_node.cpp
+)
+
+target_link_libraries(serve_controller_node
+  "${cpp_typesupport_target}"
+  yaml-cpp
+)
+
+ament_target_dependencies(serve_controller_node
+  rclcpp
+  std_msgs
+  sensor_msgs
+  ament_index_cpp
+)
+
+set_target_properties(serve_controller_node PROPERTIES
   INSTALL_RPATH "$ORIGIN"
 )
 
 # C++ 可执行文件 - 风车发球管理器
 add_executable(serve_windmill_manager
-  src/serve_windmill_manager.cpp
+  src/nodes/serve_windmill_manager.cpp
 )
 
 target_link_libraries(serve_windmill_manager
@@ -368,9 +368,9 @@ install(TARGETS
   vision_catch_controller_node
   delta_arm_manager
   teach_playback_control_node
-  parallel_arm_control_node
-  volleyball_strike_manager
   serve_windmill_manager
+  serve_controller_node
+  strike_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}

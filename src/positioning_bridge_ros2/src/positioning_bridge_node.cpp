@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <std_msgs/msg/bool.hpp>
 #include <string>
 #include <utility>
 #include <vector>
@@ -25,6 +26,7 @@ PositioningBridgeNode::PositioningBridgeNode()
   decoder_ = std::make_unique<ProtocolDecoder>(protocol_mode_);
   odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("/odom", 50);
   diagnostics_pub_ = this->create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 10);
+  ir_trigger_pub_ = this->create_publisher<std_msgs::msg::Bool>("/ir_trigger", 10);
   tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
   reset_local_origin_srv_ = this->create_service<std_srvs::srv::Trigger>(
     "/positioning/reset_local_origin",
@@ -298,6 +300,15 @@ void PositioningBridgeNode::handleFrame(const DecodedFrame & frame)
           frame.ack->acked_seq, frame.ack->result_code, frame.ack->event_counter);
       }
       break;
+    case FrameKind::IR_TRIGGER: {
+      // 红外传感器检测到球经过，发布触发事件
+      std_msgs::msg::Bool ir_msg;
+      ir_msg.data = true;
+      ir_trigger_pub_->publish(ir_msg);
+      RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500,
+        "红外触发事件 seq=%u", frame.sequence);
+      break;
+    }
     default:
       break;
   }

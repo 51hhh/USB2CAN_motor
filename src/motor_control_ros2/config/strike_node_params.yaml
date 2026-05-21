@@ -1,0 +1,259 @@
+# 击球控制节点参数配置文件
+#
+# GO-M8010-6 FOC 公式：
+#   τ = torque_ff + kp*(pos_target - pos) + kd*(vel_target - vel)
+#   重力补偿自动叠加到 torque_ff，无需手动计算
+#
+# 击球方案说明：
+#   - center: 正面击球（默认）
+#   - left:   偏左落点，蓄力位置较小，速度稍快
+#   - right:  偏右落点，蓄力位置较大，速度适中
+#
+# 视觉落点选择逻辑：
+#   landing_point.x >= vision_threshold_right → 选 "right" 方案
+#   landing_point.x <= vision_threshold_left  → 选 "left"  方案
+#   其余                                      → 选 "center" 方案
+#   超时 vision_timeout_sec 无视觉信号        → 降级为 "center"
+
+strike_node:
+  ros__parameters:
+    # 控制参数
+    control_hz: 200.0
+    joy_button_lb: 4            # Xbox 手柄 LB 按键索引
+
+    # 重力补偿参数
+    gravity_tau_inner: 8.0      # 大臂输出端重力矩 (Nm)
+    gravity_tau_outer: 3.5
+          # 小臂输出端重力矩 (Nm)
+    gear_ratio: 6.33            # 减速比
+    gravity_offset_rad: -1.5708 # π/2，水平为0参考 (rad)
+
+    # 视觉落点参数
+    vision_threshold_right: 0.15   # 大于此值 → 使用 right 方案 (m)
+    vision_threshold_left: -0.15   # 小于此值 → 使用 left  方案 (m)
+    vision_timeout_sec: 2.0        # 视觉信号超时降级时间 (s)
+    default_profile: "center"      # 默认击球方案
+
+    # 红外触发接口（下位机 → positioning_bridge_node → /ir_trigger → strike_node）
+    ir_trigger_topic: "/ir_trigger" # 红外触发话题（桥接节点发布）
+    ir_trigger_enabled: true        # false=禁用红外触发，仅使用手柄/键盘
+
+    # 手柄选方案按键映射（Xbox 标准映射：A=0, B=1, X=2, Y=3）
+    # 键盘对应：1/2/3/4 键（TODO: 键盘在 Python 层处理或通过 joy2key 转发）
+    joy_profile_buttons:
+      button_0: "center"            # A 键 → 正面击球
+      button_1: "left"              # B 键 → 偏左落点
+      button_2: "right"             # X 键 → 偏右落点
+      button_3: "strong"            # Y 键 → 强力击球
+
+    # 电机设备配置
+    motors:
+      l1_id: 0
+      l1_device: "/dev/ttyUSB0"  # 左大臂
+      l2_id: 1
+      l2_device: "/dev/ttyUSB0"  # 左小臂
+      r1_id: 2
+      r1_device: "/dev/ttyUSB1"  # 右大臂
+      r2_id: 3
+      r2_device: "/dev/ttyUSB1"  # 右小臂
+
+    # ================================================================
+    # 击球方案列表
+    # ================================================================
+    profiles:
+      # ── 正面击球（默认）─────────────────────────────────────────
+      - name: "center"
+        trigger_deg: 110.0       # 大臂到达此角度 → 切换刹停
+        sub_arm_delay_deg: 25.0  # 大臂到达此角度后小臂开始击打 (0=同时)
+        strike_timeout: 3.0      # 击打最大保护时间 (s)
+        brake_duration: 1.0      # 刹停持续时间 (s)
+        return_time: 1.5         # smoothstep 回蓄力时间 (s)
+
+        ready:
+          main:                  # 大臂 (ID 0, 2)
+            pos_deg: 10.0        # 蓄力位置 (°)
+            vel: 0.0
+            torque_ff: 0.0
+            kp: 0.5
+            kd: 0.1
+          sub:                   # 小臂 (ID 1, 3)
+            pos_deg: 10.0
+            vel: 0.0
+            torque_ff: 0.0
+            kp: 0.5
+            kd: 0.1
+
+        strike:
+          main:                  # kp=0 纯速度模式
+            pos_deg: 0.0
+            vel: 7.0            # 目标速度 (rad/s)
+            torque_ff: 0.5       # 额外加速前馈 (Nm)
+            kp: 0.0
+            kd: 0.1
+          sub:
+            pos_deg: 0.0
+            vel: 7.0
+            torque_ff: 0.5
+            kp: 0.0
+            kd: 0.1
+
+        brake:
+          main:                  # 纯阻尼刹车
+            pos_deg: 0.0
+            vel: 0.0
+            torque_ff: 0.0
+            kp: 0.0
+            kd: 0.1
+          sub:
+            pos_deg: 0.0
+            vel: 0.0
+            torque_ff: 0.0
+            kp: 0.0
+            kd: 0.1
+
+      # ── 偏左落点（加速击打）──────────────────────────────────────
+      - name: "left"
+        trigger_deg: 110.0
+        strike_timeout: 3.0
+        brake_duration: 1.0
+        return_time: 1.5
+
+        ready:
+          main:
+            pos_deg: 25.0        # 蓄力位置稍小（更快到达击打区）
+            vel: 0.0
+            torque_ff: 0.0
+            kp: 0.5
+            kd: 0.1
+          sub:
+            pos_deg: 0.0
+            vel: 0.0
+            torque_ff: 0.0
+            kp: 0.5
+            kd: 0.1
+
+        strike:
+          main:
+            pos_deg: 0.0
+            vel: 0.0             # 速度更快
+            torque_ff: 0.6
+            kp: 0.0
+            kd: 0.1
+          sub:
+            pos_deg: 0.0
+            vel: 0.0
+            torque_ff: 0.6
+            kp: 0.0
+            kd: 0.1
+
+        brake:
+          main:
+            pos_deg: 0.0
+            vel: 0.0
+            torque_ff: 0.0
+            kp: 0.0
+            kd: 0.1
+          sub:
+            pos_deg: 0.0
+            vel: 0.0
+            torque_ff: 0.0
+            kp: 0.0
+            kd: 0.1
+
+      # ── 偏右落点（控制击打）──────────────────────────────────────
+      - name: "right"
+        trigger_deg: 108.0       # 稍早触发刹停
+        strike_timeout: 3.0
+        brake_duration: 1.0
+        return_time: 1.5
+
+        ready:
+          main:
+            pos_deg: 35.0        # 蓄力位置稍大（出发时有更大力矩）
+            vel: 0.0
+            torque_ff: 0.0
+            kp: 0.5
+            kd: 0.1
+          sub:
+            pos_deg: 0.0
+            vel: 0.0
+            torque_ff: 0.0
+            kp: 0.5
+            kd: 0.1
+
+        strike:
+          main:
+            pos_deg: 0.0
+            vel: 0.0             # 速度适中
+            torque_ff: 0.4
+            kp: 0.0
+            kd: 0.1
+          sub:
+            pos_deg: 0.0
+            vel: 0.0
+            torque_ff: 0.4
+            kp: 0.0
+            kd: 0.1
+
+        brake:
+          main:
+            pos_deg: 0.0
+            vel: 0.0
+            torque_ff: 0.0
+            kp: 0.0
+            kd: 0.1
+          sub:
+            pos_deg: 0.0
+            vel: 0.0
+            torque_ff: 0.0
+            kp: 0.0
+            kd: 0.1
+
+      # ── 强力击球（Y 键 / 键盘4）──────────────────────────────────
+      - name: "strong"
+        trigger_deg: 112.0
+        strike_timeout: 3.0
+        brake_duration: 1.2
+        return_time: 1.8
+
+        ready:
+          main:
+            pos_deg: 30.0
+            vel: 0.0
+            torque_ff: 0.0
+            kp: 0.5
+            kd: 0.1
+          sub:
+            pos_deg: 0.0
+            vel: 0.0
+            torque_ff: 0.0
+            kp: 0.5
+            kd: 0.1
+
+        strike:
+          main:
+            pos_deg: 0.0
+            vel: 0.0
+            torque_ff: 0.8
+            kp: 0.0
+            kd: 0.1
+          sub:
+            pos_deg: 0.0
+            vel: 0.0
+            torque_ff: 0.8
+            kp: 0.0
+            kd: 0.1
+
+        brake:
+          main:
+            pos_deg: 0.0
+            vel: 0.0
+            torque_ff: 0.0
+            kp: 0.0
+            kd: 0.15
+          sub:
+            pos_deg: 0.0
+            vel: 0.0
+            torque_ff: 0.0
+            kp: 0.0
+            kd: 0.15

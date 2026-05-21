@@ -30,7 +30,7 @@ ROS2 电机控制系统，支持多种电机类型的实时控制和监控。
 ### 1. 编译
 
 ```bash
-cd /home/rick/desktop/ros/usb2can
+cd <工程根目录>
 colcon build --packages-select motor_control_ros2
 source install/setup.bash
 ```

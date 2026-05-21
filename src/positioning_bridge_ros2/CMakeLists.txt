@@ -12,6 +12,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(ament_index_cpp REQUIRED)
@@ -31,6 +32,7 @@ ament_target_dependencies(positioning_bridge_lib
   rclcpp
   nav_msgs
   geometry_msgs
+  std_msgs
   diagnostic_msgs
   tf2
   tf2_ros
