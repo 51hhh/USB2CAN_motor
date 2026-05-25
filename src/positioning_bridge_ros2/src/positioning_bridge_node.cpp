@@ -23,7 +23,7 @@ PositioningBridgeNode::PositioningBridgeNode()
   loadParameters();
 
   node_start_time_ = this->now();
-  decoder_ = std::make_unique<ProtocolDecoder>(protocol_mode_);
+  decoder_ = std::make_unique<ProtocolDecoder>(protocol_mode_);//结构化帧
   odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("/odom", 50);
   diagnostics_pub_ = this->create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 10);
   ir_trigger_pub_ = this->create_publisher<std_msgs::msg::Bool>("/ir_trigger", 10);
@@ -32,15 +32,7 @@ PositioningBridgeNode::PositioningBridgeNode()
     "/positioning/reset_local_origin",
     std::bind(&PositioningBridgeNode::handleResetLocalOrigin, this, std::placeholders::_1, std::placeholders::_2));
 
-  // 融合: 订阅电机轮速里程
-  if (fusion_mode_ != FusionMode::NONE) {
-    motor_twist_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-      motor_twist_topic_, rclcpp::QoS(10),
-      std::bind(&PositioningBridgeNode::onMotorTwist, this, std::placeholders::_1));
-    RCLCPP_INFO(this->get_logger(), "\u542f\u7528\u4e92\u8865\u6ee4\u6ce2\u878d\u5408, \u8ba2\u9605: %s", motor_twist_topic_.c_str());
-  } else {
-    RCLCPP_INFO(this->get_logger(), "fusion_mode=none, \u8f93\u51fa\u7eaf\u7801\u76d8 pose");
-  }
+  RCLCPP_INFO(this->get_logger(), "输出纯码盘 pose 到 /odom");
 
   read_timer_ = this->create_wall_timer(
     std::chrono::milliseconds(10), std::bind(&PositioningBridgeNode::readSerialTick, this));
@@ -124,21 +116,8 @@ void PositioningBridgeNode::loadParameters()
   diagnostic_period_sec_ = dbl("diagnostic_period_sec", 1.0);
   time_sync_period_sec_ = dbl("time_sync_period_sec", 0.5);
   pose_timeout_sec_ = dbl("pose_timeout_sec", 0.5);
-  auto_reset_origin_on_start_ = bl("auto_reset_origin_on_start", true);
+  auto_reset_origin_on_start_ = bl("auto_reset_origin_on_start", false);
   auto_reset_origin_timeout_sec_ = dbl("auto_reset_origin_timeout_sec", 3.0);
-
-  // \u878d\u5408\u53c2\u6570
-  const auto fusion_mode_str = str("fusion_mode", "none");
-  fusion_mode_ = (fusion_mode_str == "complementary") ? FusionMode::COMPLEMENTARY : FusionMode::NONE;
-  motor_twist_topic_ = str("motor_twist_topic", "/odom_wheels");
-  motor_twist_timeout_sec_ = dbl("motor_twist_timeout_sec", 0.3);
-  fusion_threshold_pos_normal_ = dbl("fusion_threshold_pos_normal", 0.05);
-  fusion_threshold_pos_alert_  = dbl("fusion_threshold_pos_alert",  0.20);
-  fusion_threshold_yaw_normal_ = dbl("fusion_threshold_yaw_normal", 0.05);
-  fusion_threshold_yaw_alert_  = dbl("fusion_threshold_yaw_alert",  0.30);
-  fusion_alpha_normal_    = dbl("fusion_alpha_normal",    0.30);
-  fusion_alpha_alert_     = dbl("fusion_alpha_alert",     0.15);
-  fusion_alpha_disturbed_ = dbl("fusion_alpha_disturbed", 0.02);
 }
 
 void PositioningBridgeNode::tryOpenSerial()
@@ -250,7 +229,6 @@ void PositioningBridgeNode::maybeAutoResetOrigin()
   std::string err;
   if (sendSetLocalOrigin(0.0F, 0.0F, 0.0F, err)) {
     origin_reset_done_ = true;
-    resetFusion();
     RCLCPP_INFO(this->get_logger(),
       "启动自动归零完成 (sync_locked=%s, elapsed=%.2fs)",
       sync_locked ? "true" : "false", elapsed);
@@ -266,7 +244,6 @@ void PositioningBridgeNode::handleResetLocalOrigin(
 {
   std::string err;
   if (sendSetLocalOrigin(0.0F, 0.0F, 0.0F, err)) {
-    resetFusion();
     response->success = true;
     response->message = "已发送 SET_LOCAL_ORIGIN(0,0,0) 请求，等待 STM32 ACK";
   } else {
@@ -321,8 +298,6 @@ void PositioningBridgeNode::publishPose(const PoseSample & incoming_pose, uint16
   PoseSample pose_sample = incoming_pose;
   const auto stamp = resolveStamp(pose_sample);
   maybeUpdateDerivedVelocity(pose_sample, stamp);
-  // \u878d\u5408 (\u4ec5 COMPLEMENTARY \u6a21\u5f0f\u4f1a\u4fee\u6539 pose_sample.x/y/yaw)
-  fusePose(pose_sample, stamp);
   auto odom_msg = buildOdometry(pose_sample, stamp);
   odom_pub_->publish(odom_msg);
   last_pose_stamp_ = stamp;
@@ -388,23 +363,6 @@ void PositioningBridgeNode::publishDiagnostics()
     push_key_value("link_state", std::to_string(latest_status_->link_state));
     push_key_value("uptime_ms", std::to_string(latest_status_->uptime_ms));
     push_key_value("error_code", std::to_string(latest_status_->error_code));
-  }
-
-  // 融合状态
-  push_key_value("fusion_mode",
-    fusion_mode_ == FusionMode::COMPLEMENTARY ? "complementary" : "none");
-  if (fusion_mode_ == FusionMode::COMPLEMENTARY) {
-    const char * state_str =
-      (fusion_state_ == FusionState::NORMAL) ? "NORMAL" :
-      (fusion_state_ == FusionState::ALERT)  ? "ALERT"  : "DISTURBED";
-    push_key_value("fusion_state", state_str);
-    push_key_value("fusion_alpha", std::to_string(last_alpha_));
-    push_key_value("fusion_residual_xy_m", std::to_string(last_residual_xy_));
-    push_key_value("fusion_residual_yaw_rad", std::to_string(last_residual_yaw_));
-    push_key_value("fusion_state_changes", std::to_string(fusion_state_change_count_));
-    const double age = latest_motor_twist_.valid ?
-      (this->now() - latest_motor_twist_.stamp).seconds() : -1.0;
-    push_key_value("motor_twist_age_sec", std::to_string(age));
   }
 
   array_msg.status.push_back(status_msg);
@@ -513,119 +471,4 @@ double PositioningBridgeNode::unwrapAngle(double previous, double current)
   return diff;
 }
 
-// ============================================================================
-// \u4e92\u8865\u6ee4\u6ce2\u878d\u5408
-// ============================================================================
-
-void PositioningBridgeNode::onMotorTwist(const nav_msgs::msg::Odometry::SharedPtr msg)
-{
-  latest_motor_twist_.vx = msg->twist.twist.linear.x;
-  latest_motor_twist_.vy = msg->twist.twist.linear.y;
-  latest_motor_twist_.wz = msg->twist.twist.angular.z;
-  latest_motor_twist_.stamp = msg->header.stamp;
-  latest_motor_twist_.valid = true;
-}
-
-void PositioningBridgeNode::resetFusion()
-{
-  fusion_initialized_ = false;
-  fused_x_ = 0.0;
-  fused_y_ = 0.0;
-  fused_yaw_ = 0.0;
-  fusion_state_ = FusionState::NORMAL;
-}
-
-bool PositioningBridgeNode::fusePose(PoseSample & pose_sample, const rclcpp::Time & stamp)
-{
-  if (fusion_mode_ != FusionMode::COMPLEMENTARY) {
-    return false;
-  }
-
-  // \u9996\u5e27 \u6216 \u91cd\u7f6e\u540e: pose_fused = pose_meas
-  if (!fusion_initialized_) {
-    fused_x_ = pose_sample.x;
-    fused_y_ = pose_sample.y;
-    fused_yaw_ = pose_sample.yaw;
-    fused_stamp_ = stamp;
-    fusion_initialized_ = true;
-    last_alpha_ = 0.0;
-    last_residual_xy_ = 0.0;
-    last_residual_yaw_ = 0.0;
-    return true;
-  }
-
-  // \u68c0\u67e5 motor_twist \u662f\u5426\u65b0\u9c9c
-  const bool twist_fresh = latest_motor_twist_.valid &&
-    ((stamp - latest_motor_twist_.stamp).seconds() < motor_twist_timeout_sec_);
-
-  // ── Step 1: \u9884\u6d4b ──
-  double dt = (stamp - fused_stamp_).seconds();
-  double pred_x = fused_x_, pred_y = fused_y_, pred_yaw = fused_yaw_;
-  if (twist_fresh && dt > 0.0 && dt < 0.5) {
-    const double cs = std::cos(fused_yaw_);
-    const double sn = std::sin(fused_yaw_);
-    const double vx_w = latest_motor_twist_.vx * cs - latest_motor_twist_.vy * sn;
-    const double vy_w = latest_motor_twist_.vx * sn + latest_motor_twist_.vy * cs;
-    pred_x   = fused_x_   + vx_w * dt;
-    pred_y   = fused_y_   + vy_w * dt;
-    pred_yaw = fused_yaw_ + latest_motor_twist_.wz * dt;
-  }
-
-  // ── Step 2: \u6b8b\u5dee ──
-  const double dx = pred_x - pose_sample.x;
-  const double dy = pred_y - pose_sample.y;
-  const double e_xy = std::hypot(dx, dy);
-  const double e_yaw = std::abs(unwrapAngle(pose_sample.yaw, pred_yaw));
-  last_residual_xy_ = e_xy;
-  last_residual_yaw_ = e_yaw;
-
-  // ── Step 3: \u81ea\u9002\u5e94 alpha ──
-  double alpha;
-  FusionState new_state;
-  if (!twist_fresh) {
-    // motor_twist \u8d85\u65f6: \u9000\u5316\u4e3a\u7eaf\u7801\u76d8 (\u540c\u987a\u4f4d\u4ecd\u8bb0\u5f55\u72b6\u6001)
-    alpha = 0.0;
-    new_state = FusionState::DISTURBED;
-  } else if (e_xy < fusion_threshold_pos_normal_ && e_yaw < fusion_threshold_yaw_normal_) {
-    alpha = fusion_alpha_normal_;
-    new_state = FusionState::NORMAL;
-  } else if (e_xy < fusion_threshold_pos_alert_ && e_yaw < fusion_threshold_yaw_alert_) {
-    alpha = fusion_alpha_alert_;
-    new_state = FusionState::ALERT;
-  } else {
-    alpha = fusion_alpha_disturbed_;
-    new_state = FusionState::DISTURBED;
-  }
-  last_alpha_ = alpha;
-
-  if (new_state != fusion_state_) {
-    fusion_state_change_count_++;
-    const char * state_str =
-      (new_state == FusionState::NORMAL) ? "NORMAL" :
-      (new_state == FusionState::ALERT)  ? "ALERT"  : "DISTURBED";
-    RCLCPP_WARN(this->get_logger(),
-      "fusion_state -> %s (e_xy=%.3fm e_yaw=%.3frad alpha=%.2f)",
-      state_str, e_xy, e_yaw, alpha);
-    fusion_state_ = new_state;
-  }
-
-  // ── Step 4: \u52a0\u6743\u878d\u5408 ──
-  fused_x_ = alpha * pred_x + (1.0 - alpha) * pose_sample.x;
-  fused_y_ = alpha * pred_y + (1.0 - alpha) * pose_sample.y;
-  // yaw \u5dee\u503c\u6cd5: meas + \u03b1 * (pred - meas), \u907f\u5f00 \u00b1\u03c0 wrap
-  const double dyaw = unwrapAngle(pose_sample.yaw, pred_yaw);
-  fused_yaw_ = pose_sample.yaw + alpha * dyaw;
-  // \u89c4\u8303\u5316\u5230 [-\u03c0, \u03c0]
-  while (fused_yaw_ > M_PI) fused_yaw_ -= 2.0 * M_PI;
-  while (fused_yaw_ < -M_PI) fused_yaw_ += 2.0 * M_PI;
-  fused_stamp_ = stamp;
-
-  // \u5c06\u878d\u5408\u540e\u7684\u503c\u5199\u56de pose_sample (\u7ed9\u4e0b\u6e38)
-  pose_sample.x = fused_x_;
-  pose_sample.y = fused_y_;
-  pose_sample.yaw = fused_yaw_;
-  return true;
-}
-
 }  // namespace positioning_bridge_ros2
-

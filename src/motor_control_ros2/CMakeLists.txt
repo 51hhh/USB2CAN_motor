@@ -224,9 +224,23 @@ add_executable(cmd_vel_mux_node
   src/nodes/cmd_vel_mux_node.cpp
 )
 
+target_link_libraries(cmd_vel_mux_node
+  yaml-cpp
+)
+
+target_link_libraries(cmd_vel_mux_node
+  yaml-cpp
+)
+
+target_link_libraries(cmd_vel_mux_node
+  yaml-cpp
+)
+
 ament_target_dependencies(cmd_vel_mux_node
   rclcpp
   geometry_msgs
+  sensor_msgs
+  ament_index_cpp
 )
 
 # C++ 可执行文件 - 视觉接球目标控制节点
@@ -269,26 +283,6 @@ set_target_properties(delta_arm_manager PROPERTIES
 )
 
 # C++ 可执行文件 - 示教回放控制节点
-find_package(nlohmann_json REQUIRED)
-
-add_executable(teach_playback_control_node
-  src/nodes/teach_playback_control_node.cpp
-)
-
-target_link_libraries(teach_playback_control_node
-  "${cpp_typesupport_target}"
-  nlohmann_json::nlohmann_json
-)
-
-ament_target_dependencies(teach_playback_control_node
-  rclcpp
-  std_msgs
-  sensor_msgs
-)
-
-set_target_properties(teach_playback_control_node PROPERTIES
-  INSTALL_RPATH "$ORIGIN"
-)
 
 # Note: parallel_arm_control_node 和 volleyball_strike_manager 已删除
 
@@ -367,7 +361,7 @@ install(TARGETS
   cmd_vel_mux_node
   vision_catch_controller_node
   delta_arm_manager
-  teach_playback_control_node
+  
   serve_windmill_manager
   serve_controller_node
   strike_node

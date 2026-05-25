@@ -30,7 +30,7 @@ ros2 service call /positioning/reset_local_origin std_srvs/srv/Trigger
 
 返回 `success: bool, message: string`，适合调试与比赛中按键复位。
 
-### 3.2 新增：启动自动归零（B 策略）
+### 3.2 可选：启动自动归零（B 策略）
 
 节点启动后，**等待时间同步锁定**再发一次 `SetLocalOrigin(0,0,0)`，一次性完成，不再重发。
 
@@ -55,10 +55,10 @@ ros2 service call /positioning/reset_local_origin std_srvs/srv/Trigger
 
 | 参数 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `auto_reset_origin_on_start` | bool | `true` | 启动时是否自动归零 |
+| `auto_reset_origin_on_start` | bool | `false` | 启动时是否自动归零 |
 | `auto_reset_origin_timeout_sec` | double | `3.0` | 等时间同步锁定的最大秒数；超时仍未锁定则强制发送 |
 
-关闭自动归零：将 `auto_reset_origin_on_start` 设为 `false`，仅靠手动 service 触发。
+默认关闭自动归零，仅靠手动 service 触发。若希望节点每次启动都重新定义局部原点，将 `auto_reset_origin_on_start` 设为 `true`。
 
 ## 5. 实现要点
 
@@ -73,7 +73,7 @@ ros2 service call /positioning/reset_local_origin std_srvs/srv/Trigger
 ## 6. 使用流程
 
 ```
-开机 → 启动 positioning_bridge_node
+开机 → 启动 positioning_bridge_node（auto_reset_origin_on_start=true 时）
         │
         ├── 串口连接成功
         ├── 等待 time_sync 锁定 (典型 0.5~2s)
@@ -88,5 +88,5 @@ ros2 service call /positioning/reset_local_origin std_srvs/srv/Trigger
 ## 7. 注意事项
 
 - **物理位置不变**，只是 ROS 中坐标重置。归零瞬间，依赖 `/odom` 做闭环的下游节点（如导航、`omni_chassis_control_node` 的位置闭环）会感知到位置跳变，应在归零前停止运动指令
-- 节点重启 = 重新归零；若希望保留累计位姿，关闭 `auto_reset_origin_on_start` 即可
+- 默认节点重启不会重新归零；若启用 `auto_reset_origin_on_start`，节点重启 = 重新归零
 - 时间同步未锁定就强制归零时，发送时刻可能略有偏差，但对原点设置本身无影响

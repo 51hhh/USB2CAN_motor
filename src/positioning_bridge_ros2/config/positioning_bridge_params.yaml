@@ -1,11 +1,12 @@
 positioning_bridge_node:
   ros__parameters:
-    serial.device: "/dev/ttyUSB0"
-    serial.baudrate: 115200
-    serial.data_bits: 8
-    serial.stop_bits: 1
-    serial.parity: "none"
-    serial.read_timeout_ms: 20
+    serial:
+      device: "/dev/ttyUSB10"
+      baudrate: 115200
+      data_bits: 8
+      stop_bits: 1
+      parity: "none"
+      read_timeout_ms: 20
 
     # legacy_ascii: 兼容当前 Chassis-positioning 的 `bc x y yaw roll`
     # binary_v1: 对接 STM32 二进制协议 (0xAA 0x55 帧头)
@@ -21,25 +22,7 @@ positioning_bridge_node:
     time_sync_period_sec: 0.5
     pose_timeout_sec: 0.5
 
-    # 启动自动归零：节点启动后等 time_sync 锁定即发送 SET_LOCAL_ORIGIN(0,0,0)
-    # 超过 timeout 仍未锁定则强制发送，避免永远阻塞
-    auto_reset_origin_on_start: true
+    # 默认不在节点启动时自动归零，避免 /odom 在下游闭环运行期间跳变
+    # 需要重新定义局部原点时，手动调用 /positioning/reset_local_origin
+    auto_reset_origin_on_start: false
     auto_reset_origin_timeout_sec: 3.0
-
-    # ── 互补滤波融合参数 (方案 1) ──
-    # 见 docs/positioning_fusion_plan_complementary.md
-    # 思路: 码盘 pose 是真值 (1-α 权重), 电机 twist 作模型预测平滑器 (α 权重)
-    fusion_mode: "complementary"      # none | complementary
-    motor_twist_topic: "/odom_wheels"
-    motor_twist_timeout_sec: 0.3      # 超时退化为纯码盘 (α=0)
-
-    # 残差阈值 (xy: m, yaw: rad)
-    fusion_threshold_pos_normal: 0.05    # 5cm 内视为正常
-    fusion_threshold_pos_alert:  0.20    # 20cm 内视为中度偏差
-    fusion_threshold_yaw_normal: 0.05    # 2.9°
-    fusion_threshold_yaw_alert:  0.30    # 17°
-
-    # 自适应权重: 残差越大, α 越小, 越信码盘
-    fusion_alpha_normal:    0.30      # 30% 电机预测 + 70% 码盘 (平时)
-    fusion_alpha_alert:     0.15      # 偏差中等
-    fusion_alpha_disturbed: 0.02      # 几乎全码盘 (被踹时)

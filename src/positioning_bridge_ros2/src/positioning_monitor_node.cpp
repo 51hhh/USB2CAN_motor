@@ -84,7 +84,6 @@ public:
   PositioningMonitorNode() : Node("positioning_monitor_node")
   {
     odom_topic_ = this->declare_parameter<std::string>("odom_topic", "/odom");
-    wheel_odom_topic_ = this->declare_parameter<std::string>("wheel_odom_topic", "/odom_wheels");
     diagnostics_topic_ = this->declare_parameter<std::string>("diagnostics_topic", "/diagnostics");
     display_rate_hz_ = this->declare_parameter<double>("display_rate_hz", 5.0);
     stale_timeout_sec_ = this->declare_parameter<double>("stale_timeout_sec", 0.5);
@@ -103,10 +102,6 @@ public:
     odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
       odom_topic_, 20,
       std::bind(&PositioningMonitorNode::odomCallback, this, std::placeholders::_1));
-
-    wheel_odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-      wheel_odom_topic_, 20,
-      std::bind(&PositioningMonitorNode::wheelOdomCallback, this, std::placeholders::_1));
 
     diagnostics_sub_ = this->create_subscription<diagnostic_msgs::msg::DiagnosticArray>(
       diagnostics_topic_, 10,
@@ -176,13 +171,6 @@ private:
     latest_odom_yaw_ = yaw;
     has_odom_ = true;
     updateStats(odom_stats_);
-  }
-
-  void wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
-  {
-    latest_wheel_odom_ = *msg;
-    has_wheel_odom_ = true;
-    updateStats(wheel_stats_);
   }
 
   void diagnosticsCallback(const diagnostic_msgs::msg::DiagnosticArray::SharedPtr msg)
@@ -276,7 +264,6 @@ private:
     oss << "│ Topic            │ State     │ Hz       │ Age(s)   │\n";
     oss << "├──────────────────┼───────────┼──────────┼──────────┤\n";
     topicRow(odom_topic_, freshText(odom_stats_), odom_stats_.hz, ageText(odom_stats_));
-    topicRow(wheel_odom_topic_, freshText(wheel_stats_), wheel_stats_.hz, ageText(wheel_stats_));
     topicRow(diagnostics_topic_, freshText(diagnostics_stats_), diagnostics_stats_.hz, ageText(diagnostics_stats_));
     oss << "└──────────────────┴───────────┴──────────┴──────────┘\n\n";
 
@@ -311,23 +298,6 @@ private:
     }
     oss << "└────────────────┴──────────────────┴──────────┴────────────────────────────┘\n\n";
 
-    oss << COLOR_BOLD << "/odom_wheels 轮速里程计" << COLOR_RESET << "\n";
-    oss << "┌────────────────┬──────────────────┬──────────┬────────────────────────────┐\n";
-    oss << "│ Field          │ Value            │ Unit     │ Note                       │\n";
-    oss << "├────────────────┼──────────────────┼──────────┼────────────────────────────┤\n";
-    if (has_wheel_odom_) {
-      const auto & t = latest_wheel_odom_.twist.twist;
-      const auto & p = latest_wheel_odom_.pose.pose.position;
-      valueRow("wheel_x", formatDouble(p.x, 6), "m");
-      valueRow("wheel_y", formatDouble(p.y, 6), "m");
-      valueRow("wheel_vx", formatDouble(t.linear.x, 6), "m/s");
-      valueRow("wheel_vy", formatDouble(t.linear.y, 6), "m/s");
-      valueRow("wheel_wz", formatDouble(t.angular.z, 6), "rad/s");
-    } else {
-      valueRow("status", "waiting", "-", "pure encoder fusion");
-    }
-    oss << "└────────────────┴──────────────────┴──────────┴────────────────────────────┘\n\n";
-
     auto diagRow = [&oss](const std::string & name, const std::string & value,
                 const std::string & name2, const std::string & value2) {
       oss << "│ " << std::left << std::setw(20) << name
@@ -345,10 +315,7 @@ private:
     diagRow("frames_ok", valueOr(diagnostics_values_, "frames_ok"), "crc_error", valueOr(diagnostics_values_, "frames_crc_error"));
     diagRow("parse_error", valueOr(diagnostics_values_, "frames_parse_error"), "last_error", valueOr(diagnostics_values_, "last_serial_error", ""));
     diagRow("time_sync_locked", boolColorText(valueOr(diagnostics_values_, "time_sync_locked")), "samples", valueOr(diagnostics_values_, "time_sync_samples"));
-    diagRow("rtt_us", valueOr(diagnostics_values_, "time_sync_rtt_us"), "fusion", valueOr(diagnostics_values_, "fusion_state"));
-    diagRow("alpha", valueOr(diagnostics_values_, "fusion_alpha"), "motor_twist_age", valueOr(diagnostics_values_, "motor_twist_age_sec"));
-    diagRow("residual_xy", valueOr(diagnostics_values_, "fusion_residual_xy_m"), "residual_yaw", valueOr(diagnostics_values_, "fusion_residual_yaw_rad"));
-    diagRow("state_changes", valueOr(diagnostics_values_, "fusion_state_changes"), "", "");
+    diagRow("rtt_us", valueOr(diagnostics_values_, "time_sync_rtt_us"), "", "");
     oss << "└──────────────────────┴────────────────────┴──────────────────────┴────────────────────┘\n\n";
 
     const double time_sync_samples = doubleValueOr(diagnostics_values_, "time_sync_samples", 0.0);
@@ -367,7 +334,6 @@ private:
   }
 
   std::string odom_topic_;
-  std::string wheel_odom_topic_;
   std::string diagnostics_topic_;
   double display_rate_hz_ {5.0};
   double stale_timeout_sec_ {0.5};
@@ -375,19 +341,15 @@ private:
   double yaw_jump_warn_rad_ {0.10};
 
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
-  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr wheel_odom_sub_;
   rclcpp::Subscription<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diagnostics_sub_;
   rclcpp::TimerBase::SharedPtr display_timer_;
 
   TopicStats odom_stats_;
-  TopicStats wheel_stats_;
   TopicStats diagnostics_stats_;
 
   bool has_odom_ {false};
-  bool has_wheel_odom_ {false};
   bool has_diagnostics_ {false};
   nav_msgs::msg::Odometry latest_odom_;
-  nav_msgs::msg::Odometry latest_wheel_odom_;
   double latest_odom_yaw_ {0.0};
 
   double last_step_xy_m_ {0.0};

@@ -31,25 +31,6 @@ private:
     bool valid {false};
   };
 
-  enum class FusionMode {
-    NONE,
-    COMPLEMENTARY,
-  };
-
-  enum class FusionState {
-    NORMAL,
-    ALERT,
-    DISTURBED,
-  };
-
-  struct MotorTwistSample {
-    double vx {0.0};
-    double vy {0.0};
-    double wz {0.0};
-    rclcpp::Time stamp {0, 0, RCL_ROS_TIME};
-    bool valid {false};
-  };
-
   void declareParameters();
   std::string resolveConfigFile();
   void loadParameters();
@@ -72,12 +53,6 @@ private:
   void maybeUpdateDerivedVelocity(PoseSample & pose_sample, const rclcpp::Time & stamp);
   static double unwrapAngle(double previous, double current);
 
-  void onMotorTwist(const nav_msgs::msg::Odometry::SharedPtr msg);
-  // 在 publishPose 内部对 pose_sample 做就地修改 (xy/yaw 替换为融合结果)
-  // 返回 true 表示融合发生 (任意模式), false 表示完全跳过
-  bool fusePose(PoseSample & pose_sample, const rclcpp::Time & stamp);
-  void resetFusion();
-
   SerialConfig serial_config_;
   ProtocolMode protocol_mode_ {ProtocolMode::LEGACY_ASCII};
   SerialTransport serial_;
@@ -92,33 +67,8 @@ private:
   double diagnostic_period_sec_ {1.0};
   double time_sync_period_sec_ {0.5};
   double pose_timeout_sec_ {0.5};
-  bool auto_reset_origin_on_start_ {true};
+  bool auto_reset_origin_on_start_ {false};
   double auto_reset_origin_timeout_sec_ {3.0};
-
-  // ── 融合参数 ──
-  FusionMode fusion_mode_ {FusionMode::NONE};
-  std::string motor_twist_topic_ {"/odom_wheels"};
-  double motor_twist_timeout_sec_ {0.3};
-  double fusion_threshold_pos_normal_ {0.05};
-  double fusion_threshold_pos_alert_  {0.20};
-  double fusion_threshold_yaw_normal_ {0.05};
-  double fusion_threshold_yaw_alert_  {0.30};
-  double fusion_alpha_normal_    {0.30};
-  double fusion_alpha_alert_     {0.15};
-  double fusion_alpha_disturbed_ {0.02};
-
-  // ── 融合运行时状态 ──
-  MotorTwistSample latest_motor_twist_;
-  bool fusion_initialized_ {false};
-  double fused_x_   {0.0};
-  double fused_y_   {0.0};
-  double fused_yaw_ {0.0};
-  rclcpp::Time fused_stamp_ {0, 0, RCL_ROS_TIME};
-  FusionState fusion_state_ {FusionState::NORMAL};
-  uint64_t fusion_state_change_count_ {0};
-  double last_residual_xy_ {0.0};
-  double last_residual_yaw_ {0.0};
-  double last_alpha_ {0.0};
 
   uint16_t next_tx_sequence_ {1};
   rclcpp::Time last_pose_stamp_ {0, 0, RCL_ROS_TIME};
@@ -133,8 +83,6 @@ private:
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr ir_trigger_pub_;  // 红外触发事件
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_local_origin_srv_;
-
-  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr motor_twist_sub_;
 
   rclcpp::TimerBase::SharedPtr read_timer_;
   rclcpp::TimerBase::SharedPtr diagnostics_timer_;

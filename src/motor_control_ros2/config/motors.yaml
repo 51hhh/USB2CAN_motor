@@ -33,44 +33,44 @@ can_interfaces:
   - name: DJI3508_4
     type: GM3508
     id: 4
-serial_interfaces:
-- device: /dev/ttyUSB0
-  baudrate: 4000000
-  protocol: native
-  motors:
-  - name: strike_motor_L1
-    type: GO8010
-    id: 0
-    direction: -1
-    offset: -0.331454
-    gear_ratio: 6.33
-    k_pos: 0.01
-    k_spd: 0.005
-  - name: strike_motor_L2
-    type: GO8010
-    id: 1
-    direction: 1
-    offset: 0.644823
-    gear_ratio: 6.33
-    k_pos: 0.01
-    k_spd: 0.005
-- device: /dev/ttyUSB1
-  baudrate: 4000000
-  protocol: native
-  motors:
-  - name: strike_motor_R1
-    type: GO8010
-    id: 2
-    direction: 1
-    offset: 0.776411
-    gear_ratio: 6.33
-    k_pos: 0.01
-    k_spd: 0.005
-  - name: strike_motor_R2
-    type: GO8010
-    id: 3
-    direction: -1
-    offset: -0.965796
-    gear_ratio: 6.33
-    k_pos: 0.01
-    k_spd: 0.005
+# serial_interfaces: (宇树电机未接入时注释掉，避免抢占定位板串口)
+# - device: /dev/ttyUSB0
+#   baudrate: 4000000
+#   protocol: native
+#   motors:
+#   - name: strike_motor_L1
+#     type: GO8010
+#     id: 0
+#     direction: -1
+#     offset: -0.331454
+#     gear_ratio: 6.33
+#     k_pos: 0.01
+#     k_spd: 0.005
+#   - name: strike_motor_L2
+#     type: GO8010
+#     id: 1
+#     direction: 1
+#     offset: 0.644823
+#     gear_ratio: 6.33
+#     k_pos: 0.01
+#     k_spd: 0.005
+# - device: /dev/ttyUSB1
+#   baudrate: 4000000
+#   protocol: native
+#   motors:
+#   - name: strike_motor_R1
+#     type: GO8010
+#     id: 2
+#     direction: 1
+#     offset: 0.776411
+#     gear_ratio: 6.33
+#     k_pos: 0.01
+#     k_spd: 0.005
+#   - name: strike_motor_R2
+#     type: GO8010
+#     id: 3
+#     direction: -1
+#     offset: -0.965796
+#     gear_ratio: 6.33
+#     k_pos: 0.01
+#     k_spd: 0.005
