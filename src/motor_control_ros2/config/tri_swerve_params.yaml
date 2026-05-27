@@ -1,0 +1,62 @@
+tri_swerve_chassis_node:
+  ros__parameters:
+    # ──────────────────────────────────────────────────────────────────
+    # 底盘几何参数
+    # ──────────────────────────────────────────────────────────────────
+    # circumradius: 底盘中心到各舵轮安装轴的距离 (m)
+    # 等边三角形三舵轮，三个轮子等距排布在该圆周上
+    circumradius: 0.25
+
+    # wheel_radius: 驱动轮橡胶滚动半径 (m)
+    wheel_radius: 0.076
+
+    # ──────────────────────────────────────────────────────────────────
+    # 控制参数
+    # ──────────────────────────────────────────────────────────────────
+    control_frequency: 100.0     # 控制循环频率 (Hz)
+    max_linear_velocity: 1.5     # 最大平移速度 (m/s)
+    max_angular_velocity: 3.0    # 最大旋转角速度 (rad/s)
+
+    # cmd_vel 输入话题（默认 /cmd_vel，可切换到 /cmd_vel_remote 等）
+    cmd_vel_topic: "/cmd_vel"
+
+    # ──────────────────────────────────────────────────────────────────
+    # 轮子电机映射（与 motors.yaml 中的 joint_name 对应）
+    # 布局（ROS 坐标：X 向前，Y 向左）：
+    #
+    #        F
+    #       /  \
+    #      BL--BR
+    #
+    #   F  ：前方   rx = +R,    ry = 0
+    #   BL ：后左   rx = -R/2,  ry = +R*sqrt(3)/2
+    #   BR ：后右   rx = -R/2,  ry = -R*sqrt(3)/2
+    # ──────────────────────────────────────────────────────────────────
+
+    # ── 前轮 (F) ──────────────────────────────────────────────────────
+    f_steer_motor: "f_steer"        # GM6020 转向电机 joint_name
+    f_drive_motor: "f_drive"        # GM3508 驱动电机 joint_name
+
+    # 转向零位偏移：机械正前方时 GM6020 编码器角度 (度, 0~360)
+    # 上电后转到正前方，读取 /dji_motor_states 中该轮的 angle 值填入
+    f_steer_offset: 0.0
+
+    # 转向方向：1 = 编码器增大时舵轮逆时针转（从上往下看），-1 反向
+    f_steer_direction: 1
+
+    # 驱动方向：1 = 正速度命令时轮子向前滚，-1 反向（安装方向相反时取 -1）
+    f_drive_direction: 1
+
+    # ── 后左轮 (BL) ───────────────────────────────────────────────────
+    bl_steer_motor: "bl_steer"
+    bl_drive_motor: "bl_drive"
+    bl_steer_offset: 0.0
+    bl_steer_direction: 1
+    bl_drive_direction: 1
+
+    # ── 后右轮 (BR) ───────────────────────────────────────────────────
+    br_steer_motor: "br_steer"
+    br_drive_motor: "br_drive"
+    br_steer_offset: 0.0
+    br_steer_direction: 1
+    br_drive_direction: 1

@@ -355,6 +355,27 @@ set_target_properties(serve_windmill_manager PROPERTIES
   INSTALL_RPATH "$ORIGIN"
 )
 
+# C++ 可执行文件 - 等边三角形三舵轮底盘控制节点
+add_executable(tri_swerve_chassis_node
+  src/nodes/tri_swerve_chassis_node.cpp
+)
+
+target_link_libraries(tri_swerve_chassis_node
+  motor_control_lib
+  yaml-cpp
+)
+
+set_target_properties(tri_swerve_chassis_node PROPERTIES
+  INSTALL_RPATH "$ORIGIN"
+)
+
+ament_target_dependencies(tri_swerve_chassis_node
+  rclcpp
+  std_msgs
+  geometry_msgs
+  ament_index_cpp
+)
+
 # 安装目标
 install(TARGETS
   motor_control_lib
@@ -371,6 +392,7 @@ install(TARGETS
   serve_windmill_manager
   serve_controller_node
   strike_node
+  tri_swerve_chassis_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}
