@@ -921,14 +921,12 @@ private:
         break;
         
       case ControlMode::VELOCITY:
-        // ROS 消息使用弧度/秒，底层 PID 使用 RPM
-        // 1 rad/s = 60 / (2*PI) RPM ≈ 9.55 RPM
+        // 底盘节点已将线速度转为电机轴 RPM，直接使用
         {
-          double rpm = msg->velocity_target * 60.0 / (2.0 * M_PI);
-          dji->setVelocityTarget(rpm);
+          dji->setVelocityTarget(msg->velocity_target);
           RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-                               "[CMD ADV] %s 速度控制: %.3f rad/s (%.1f RPM)", 
-                               msg->joint_name.c_str(), msg->velocity_target, rpm);
+                               "[CMD ADV] %s 速度控制: %.1f RPM",
+                               msg->joint_name.c_str(), msg->velocity_target);
         }
         break;
         

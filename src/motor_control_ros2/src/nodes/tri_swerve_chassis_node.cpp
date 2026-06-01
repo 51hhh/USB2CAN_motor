@@ -209,14 +209,17 @@ private:
             steer_msg.position_target = encoder_deg * M_PI / 180.0;
             motor_cmd_pub_->publish(steer_msg);
 
-            // 驱动电机：速度控制（线速度 → rad/s）
+            // 驱动电机：速度控制（m/s → 电机轴 RPM，匹配 PID 期望单位）
             auto drive_msg = motor_control_ros2::msg::DJIMotorCommandAdvanced();
             drive_msg.header.stamp = now;
             drive_msg.joint_name = drive_motor_[i];
             drive_msg.mode = motor_control_ros2::msg::DJIMotorCommandAdvanced::MODE_VELOCITY;
-            // v (m/s) / r (m) = ω (rad/s)，再应用方向
-            drive_msg.velocity_target =
-                (cmds[i].velocity / wheel_radius_) * drive_direction_[i];
+            // v(m/s) / r(m) = ω(rad/s,输出轴) → ×60/(2π)×gear_ratio → RPM(电机轴)
+            double output_rad_s = cmds[i].velocity / wheel_radius_;
+            double motor_rpm = output_rad_s * 60.0 / (2.0 * M_PI) * drive_gear_ratio_;
+            // 硬限幅：3500 RPM 上限（防止 PID 积分饱和超速）
+            motor_rpm = std::clamp(motor_rpm, -3500.0, 3500.0);
+            drive_msg.velocity_target = motor_rpm * drive_direction_[i];
             motor_cmd_pub_->publish(drive_msg);
         }
     }
@@ -244,6 +247,7 @@ private:
         require("wheel_radius");      wheel_radius_       = p["wheel_radius"].as<double>();
         require("max_linear_velocity");  max_linear_velocity_  = p["max_linear_velocity"].as<double>();
         require("max_angular_velocity"); max_angular_velocity_ = p["max_angular_velocity"].as<double>();
+        if (p["drive_gear_ratio"]) drive_gear_ratio_ = p["drive_gear_ratio"].as<double>();
 
         if (p["cmd_vel_topic"]) cmd_vel_topic_ = p["cmd_vel_topic"].as<std::string>();
 
@@ -268,9 +272,10 @@ private:
     // ------------------------------------------------------------------
     // 参数
     double control_frequency_  { 100.0 };
-    double circumradius_       { 0.25  };   // 中心到轮子的距离 (m)
-    double wheel_radius_       { 0.076 };   // 轮子滚动半径 (m)
-    double max_linear_velocity_  { 1.5  };
+    double circumradius_       { 0.25  };
+    double wheel_radius_       { 0.15  };
+    double drive_gear_ratio_   { 19.0 };   // GM3508 减速比
+    double max_linear_velocity_  { 3.0  };
     double max_angular_velocity_ { 3.0  };
     std::string cmd_vel_topic_ { "/cmd_vel" };
 

@@ -3,8 +3,10 @@
 joystick_control_node:
   ros__parameters:
     # 速度限制（应与底盘控制节点一致）
-    max_linear_velocity: 2.0      # 最大线速度 (m/s)
-    max_angular_velocity: 2.0     # 最大角速度 (rad/s)
+    max_linear_velocity: 2.9      # 最大线速度 (m/s) → 3500 RPM
+    # max_angular_velocity = max_linear_velocity / circumradius → 2.9/0.25=11.6
+    # 使得旋转时轮边线速度与直线行驶时对齐
+    max_angular_velocity: 11.6    # 最大角速度 (rad/s)
     
     # 摇杆参数
     deadzone: 0.05                  # 摇杆死区 [0, 1] - 降低以提高精细度
@@ -18,7 +20,7 @@ joystick_control_node:
     
     # 速度模式增益（可通过按钮切换）
     speed_mode_slow: 0.25           # 慢速模式：25% → 0.5 m/s（X 键）
-    speed_mode_normal: 0.5          # 正常模式：50% → 1.0 m/s（A 键）
+    speed_mode_normal: 1.0          # 正常模式：100% → 3.0 m/s（A 键）
     speed_mode_fast: 1.0            # 快速模式：100% → 2.0 m/s（Y 键）
     
     # Xbox 手柄轴映射（标准 ROS joy 驱动）
@@ -34,6 +36,9 @@ joystick_control_node:
     button_normal_mode: 0           # A 键 → 正常模式
     button_fast_mode: 3             # Y 键 → 快速模式
     button_enable: 7                # Start 键 → 启用/禁用控制
+    button_speed_up: 5              # RB(右肩键) → 加速一档
+    button_speed_down: 4            # LB(左肩键) → 减速一档
+    speed_step: 0.1                 # 每次按肩键调速步长 (10%)
 
     # 话题配置
     joy_topic: "/joy"
@@ -45,12 +50,9 @@ joystick_control_node:
 # ├────────────────────────────────────────────────┤
 # │ 左摇杆：      前进/后退 + 左右平移             │
 # │ 右摇杆：      原地旋转                          │
+# │ LB/RB 肩键：  减速/加速（每次 ±10%）           │
 # │ LT 触发器：   减速（按住降低速度）              │
 # │ RT 触发器：   加速（按住提高速度）              │
-# │                                                 │
-# │ A 键：        正常模式 (60% 速度)               │
+# │ Start 键：    启用/禁用                        │
 # │ B 键：        急停                              │
-# │ X 键：        慢速模式 (30% 速度)               │
-# │ Y 键：        快速模式 (100% 速度)              │
-# │ Start 键：    启用/禁用控制（切换开关）         │
 # └────────────────────────────────────────────────┘

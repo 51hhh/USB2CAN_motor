@@ -1,19 +1,19 @@
 can_interfaces:
-# - device: /dev/ttyACM1
-#   baudrate: 921600
-#   motors:
-#   - name: DJI6020_1
-#     type: GM6020
-#     id: 1
-#   - name: DJI6020_2
-#     type: GM6020
-#     id: 2
-#   - name: DJI6020_3
-#     type: GM6020
-#     id: 3
-#   - name: DJI6020_4
-#     type: GM6020
-#     id: 4
+- device: /dev/ttyACM1
+  baudrate: 921600
+  motors:
+  - name: DJI6020_1
+    type: GM6020
+    id: 1
+    offset: 2.619093
+  - name: DJI6020_2
+    type: GM6020
+    id: 2
+    offset: 5.202326
+  - name: DJI6020_4
+    type: GM6020
+    id: 4
+    offset: 2.060388
 - device: /dev/ttyACM0
   baudrate: 921600
   motors:
@@ -27,50 +27,50 @@ can_interfaces:
     # direction: -1
     # offset: 37.802063
     # mirror_from: DJI3508_1
-  - name: DJI3508_3
-    type: GM3508
-    id: 3
   - name: DJI3508_4
     type: GM3508
     id: 4
-serial_interfaces:
-- device: /dev/ttyUSB0
-  baudrate: 4000000
-  protocol: native
-  motors:
-  - name: strike_motor_L1
-    type: GO8010
-    id: 0
-    direction: -1
-    offset: -0.331454
-    gear_ratio: 6.33
-    k_pos: 0.01
-    k_spd: 0.005
-  - name: strike_motor_L2
-    type: GO8010
-    id: 1
-    direction: 1
-    offset: 0.644823
-    gear_ratio: 6.33
-    k_pos: 0.01
-    k_spd: 0.005
-- device: /dev/ttyUSB1
-  baudrate: 4000000
-  protocol: native
-  motors:
-  - name: strike_motor_R1
-    type: GO8010
-    id: 2
-    direction: 1
-    offset: 0.776411
-    gear_ratio: 6.33
-    k_pos: 0.01
-    k_spd: 0.005
-  - name: strike_motor_R2
-    type: GO8010
-    id: 3
-    direction: -1
-    offset: -0.965796
-    gear_ratio: 6.33
-    k_pos: 0.01
-    k_spd: 0.005
+  # - name: DJI3508_4
+  #   type: GM3508
+  #   id: 4
+# serial_interfaces:
+# - device: /dev/ttyUSB0
+#   baudrate: 4000000
+#   protocol: native
+#   motors:
+#   - name: strike_motor_L1
+#     type: GO8010
+#     id: 0
+#     direction: -1
+#     offset: -0.331454
+#     gear_ratio: 6.33
+#     k_pos: 0.01
+#     k_spd: 0.005
+#   - name: strike_motor_L2
+#     type: GO8010
+#     id: 1
+#     direction: 1
+#     offset: 0.644823
+#     gear_ratio: 6.33
+#     k_pos: 0.01
+#     k_spd: 0.005
+# - device: /dev/ttyUSB1
+#   baudrate: 4000000
+#   protocol: native
+#   motors:
+#   - name: strike_motor_R1
+#     type: GO8010
+#     id: 2
+#     direction: 1
+#     offset: 0.776411
+#     gear_ratio: 6.33
+#     k_pos: 0.01
+#     k_spd: 0.005
+#   - name: strike_motor_R2
+#     type: GO8010
+#     id: 3
+#     direction: -1
+#     offset: -0.965796
+#     gear_ratio: 6.33
+#     k_pos: 0.01
+#     k_spd: 0.005

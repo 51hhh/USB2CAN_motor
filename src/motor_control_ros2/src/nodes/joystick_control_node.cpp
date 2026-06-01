@@ -44,6 +44,9 @@ JoystickControlNode::JoystickControlNode()
     this->declare_parameter("button_normal_mode", 0);     // A
     this->declare_parameter("button_fast_mode", 3);       // Y
     this->declare_parameter("button_enable", 7);          // Start
+    this->declare_parameter("button_speed_up", 5);        // RB 肩键
+    this->declare_parameter("button_speed_down", 4);      // LB 肩键
+    this->declare_parameter("speed_step", 0.1);            // 步长
     this->declare_parameter("joy_topic", "/joy");
     this->declare_parameter("cmd_vel_topic", "/cmd_vel_joy");
     
@@ -72,6 +75,9 @@ JoystickControlNode::JoystickControlNode()
     button_normal_mode_ = this->get_parameter("button_normal_mode").as_int();
     button_fast_mode_ = this->get_parameter("button_fast_mode").as_int();
     button_enable_ = this->get_parameter("button_enable").as_int();
+    button_speed_up_ = this->get_parameter("button_speed_up").as_int();
+    button_speed_down_ = this->get_parameter("button_speed_down").as_int();
+    speed_step_ = this->get_parameter("speed_step").as_double();
     joy_topic_ = this->get_parameter("joy_topic").as_string();
     cmd_vel_topic_ = this->get_parameter("cmd_vel_topic").as_string();
     
@@ -192,9 +198,27 @@ void JoystickControlNode::joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg
                     current_speed_gain_ * 100);
     }
     
+    // 处理 LB/RB 肩键调速（边缘触发）
+    static bool last_speed_up = false, last_speed_down = false;
+    bool speed_up = msg->buttons.size() > (size_t)button_speed_up_ &&
+                    msg->buttons[button_speed_up_];
+    bool speed_down = msg->buttons.size() > (size_t)button_speed_down_ &&
+                      msg->buttons[button_speed_down_];
+    if (speed_up && !last_speed_up) {
+        current_speed_gain_ = std::min(1.0, current_speed_gain_ + speed_step_);
+        RCLCPP_INFO(this->get_logger(), "速度提升至 %.0f%%", current_speed_gain_ * 100);
+    }
+    if (speed_down && !last_speed_down) {
+        current_speed_gain_ = std::max(0.05, current_speed_gain_ - speed_step_);
+        RCLCPP_INFO(this->get_logger(), "速度降低至 %.0f%%", current_speed_gain_ * 100);
+    }
+    last_speed_up = speed_up;
+    last_speed_down = speed_down;
+    
     // 读取摇杆值
-    double raw_vx = msg->axes.size() > (size_t)axis_linear_x_ ? 
-                    msg->axes[axis_linear_x_] : 0.0;
+    // 左摇杆 Y 轴上推为负，取反使前进方向为正
+    double raw_vx = -(msg->axes.size() > (size_t)axis_linear_x_ ?
+                      msg->axes[axis_linear_x_] : 0.0);
     double raw_vy = msg->axes.size() > (size_t)axis_linear_y_ ? 
                     msg->axes[axis_linear_y_] : 0.0;
     double raw_wz = msg->axes.size() > (size_t)axis_angular_ ? 

@@ -294,22 +294,14 @@ bool CANInterface::parseFrame(CANFrame& frame) {
       return false;
     }
     
-    // 检查帧尾
-    if (rx_accumulator_[15] != 0x55) {
-      // 帧尾不正确，丢弃这个帧头，继续寻找
-      rx_accumulator_.erase(rx_accumulator_.begin(), rx_accumulator_.begin() + 1);
-      std::lock_guard<std::mutex> lock2(stats_mutex_);
-      stats_.frame_errors++;
-      continue;
-    }
-    
     // 解析帧
+    // 实际协议格式（经验证, 无 0x55 尾部标记）:
     // Byte 0: 0xAA (帧头)
-    // Byte 1: CMD
-    // Byte 2: 格式 (包含数据长度、帧类型等)
+    // Byte 1-2: 协议字节
     // Byte 3-6: CAN ID (小端)
     // Byte 7-14: 数据 (8字节)
-    // Byte 15: 0x55 (帧尾)
+    // 注: 之前代码检查 byte 15 == 0x55 作为帧尾，但实际 USB-CAN
+    // 适配器对轮询反馈帧并无此尾部标记，导致所有帧被丢弃。
     
     frame.can_id = rx_accumulator_[3] | (rx_accumulator_[4] << 8) | 
                    (rx_accumulator_[5] << 16) | (rx_accumulator_[6] << 24);

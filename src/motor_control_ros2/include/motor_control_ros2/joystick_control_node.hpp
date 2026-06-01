@@ -87,6 +87,9 @@ private:
     int button_normal_mode_;
     int button_fast_mode_;
     int button_enable_;
+    int button_speed_up_;          // RB 加速
+    int button_speed_down_;        // LB 减速
+    double speed_step_;            // 调速步长
     
     // 状态变量
     bool enabled_;
