@@ -1,6 +1,7 @@
 #include "motor_control_ros2/joystick_control_node.hpp"
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 namespace motor_control {
 
@@ -45,7 +46,7 @@ JoystickControlNode::JoystickControlNode()
     this->declare_parameter("button_fast_mode", 3);       // Y
     this->declare_parameter("button_enable", 7);          // Start
     this->declare_parameter("joy_topic", "/joy");
-    this->declare_parameter("cmd_vel_topic", "/cmd_vel_joy");
+    this->declare_parameter("cmd_vel_topic", "/cmd_vel");
     
     // 读取参数
     max_linear_velocity_ = this->get_parameter("max_linear_velocity").as_double();
@@ -129,19 +130,43 @@ void JoystickControlNode::joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg
         return;
     }
     
+    auto publish_enabled = [this]() {
+        auto enable_msg = std_msgs::msg::Bool();
+        enable_msg.data = enabled_;
+        enable_pub_->publish(enable_msg);
+    };
+
+    // B 键急停优先。解除急停后保持禁用，需要再次按 Start 使能。
+    static bool last_estop_button = false;
+    bool estop_button = msg->buttons.size() > (size_t)button_emergency_stop_ &&
+                        msg->buttons[button_emergency_stop_];
+    if (estop_button && !last_estop_button) {
+        emergency_stop_ = !emergency_stop_;
+        target_vx_ = target_vy_ = target_wz_ = 0.0;
+        current_vx_ = current_vy_ = current_wz_ = 0.0;
+        if (emergency_stop_) {
+            RCLCPP_WARN(this->get_logger(), "急停激活！");
+            enabled_ = false;
+            publish_enabled();
+        } else {
+            RCLCPP_INFO(this->get_logger(), "急停解除，按 Start 重新启用控制");
+        }
+    }
+    last_estop_button = estop_button;
+
+    if (emergency_stop_) {
+        return;
+    }
+
     // 处理使能按钮（Start 键切换）
     static bool last_enable_button = false;
-    bool enable_button = msg->buttons.size() > (size_t)button_enable_ && 
+    bool enable_button = msg->buttons.size() > (size_t)button_enable_ &&
                          msg->buttons[button_enable_];
     if (enable_button && !last_enable_button) {
         enabled_ = !enabled_;
         RCLCPP_INFO(this->get_logger(), "控制 %s", enabled_ ? "启用" : "禁用");
-        
-        // 发布使能状态
-        auto enable_msg = std_msgs::msg::Bool();
-        enable_msg.data = enabled_;
-        enable_pub_->publish(enable_msg);
-        
+        publish_enabled();
+
         // 禁用时清零速度
         if (!enabled_) {
             target_vx_ = target_vy_ = target_wz_ = 0.0;
@@ -149,26 +174,8 @@ void JoystickControlNode::joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg
         }
     }
     last_enable_button = enable_button;
-    
-    // 处理急停按钮（B 键）
-    static bool last_estop_button = false;
-    bool estop_button = msg->buttons.size() > (size_t)button_emergency_stop_ && 
-                        msg->buttons[button_emergency_stop_];
-    if (estop_button && !last_estop_button) {
-        emergency_stop_ = !emergency_stop_;
-        if (emergency_stop_) {
-            RCLCPP_WARN(this->get_logger(), "急停激活！");
-            target_vx_ = target_vy_ = target_wz_ = 0.0;
-            current_vx_ = current_vy_ = current_wz_ = 0.0;
-            enabled_ = false;
-        } else {
-            RCLCPP_INFO(this->get_logger(), "急停解除");
-        }
-    }
-    last_estop_button = estop_button;
-    
-    // 急停状态下不处理其他输入
-    if (emergency_stop_ || !enabled_) {
+
+    if (!enabled_) {
         return;
     }
     
@@ -231,6 +238,10 @@ void JoystickControlNode::joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg
 
 void JoystickControlNode::publishCmdVel() {
     auto now = this->now();
+    double dt = (now - last_update_time_).seconds();
+    if (dt <= 0.0 || dt > 1.0) {
+        dt = 1.0 / publish_rate_;
+    }
     last_update_time_ = now;
     
     // 检查手柄超时
@@ -245,12 +256,12 @@ void JoystickControlNode::publishCmdVel() {
     // 急停或禁用状态下发送零速度
     if (emergency_stop_ || !enabled_) {
         target_vx_ = target_vy_ = target_wz_ = 0.0;
+        current_vx_ = current_vy_ = current_wz_ = 0.0;
+    } else {
+        current_vx_ = rateLimit(current_vx_, target_vx_, accel_limit_, dt);
+        current_vy_ = rateLimit(current_vy_, target_vy_, accel_limit_, dt);
+        current_wz_ = rateLimit(current_wz_, target_wz_, angular_accel_limit_, dt);
     }
-    
-    // 直接使用目标速度（无加速度限制，PID 自身有力矩限幅）
-    current_vx_ = target_vx_;
-    current_vy_ = target_vy_;
-    current_wz_ = target_wz_;
     
     // 发布速度命令
     auto cmd_msg = geometry_msgs::msg::Twist();

@@ -1,241 +1,409 @@
-#include <rclcpp/rclcpp.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
+#include <geometry_msgs/msg/pose2_d.hpp>
 #include <geometry_msgs/msg/twist.hpp>
+#include <nav_msgs/msg/odometry.hpp>
+#include <rcl_interfaces/msg/set_parameters_result.hpp>
+#include <rclcpp/rclcpp.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <functional>
+#include <memory>
+#include <string>
 
 #include <yaml-cpp/yaml.h>
 
-#include "motor_control_ros2/omni_wheel_kinematics.hpp"
 #include "motor_control_ros2/msg/dji_motor_command_advanced.hpp"
-
-#include <array>
-#include <string>
-#include <memory>
-#include <chrono>
+#include "motor_control_ros2/omni_wheel_kinematics.hpp"
+#include "motor_control_ros2/pid_controller.hpp"
 
 namespace motor_control {
 
-/**
- * @brief X 形全向轮底盘控制节点
- * 
- * 功能：
- * - 订阅底盘速度命令（默认 /cmd_vel，可由配置文件修改）
- * - X 形全向轮运动学逆解算 → 4 个电机速度命令
- * - 发布 DJI GM3508 电机控制命令
- */
-class OmniChassisControlNode : public rclcpp::Node {
-public:
-    OmniChassisControlNode() : Node("omni_chassis_control_node") {
-        this->declare_parameter("config_file", "");
+namespace {
 
-        const std::string control_params_file = resolveControlParamsFile();
-        try {
-            loadControlParams(control_params_file);
-        } catch (const std::exception & e) {
-            RCLCPP_ERROR(this->get_logger(), "omni_chassis_control_node 配置加载失败: %s", e.what());
-            RCLCPP_ERROR(this->get_logger(), "配置文件路径: %s", control_params_file.c_str());
-            throw;
-        }
+double normalizeAngle(double angle) {
+  while (angle > M_PI) {
+    angle -= 2.0 * M_PI;
+  }
+  while (angle < -M_PI) {
+    angle += 2.0 * M_PI;
+  }
+  return angle;
+}
 
-        if (control_frequency_ <= 0.0) {
-            RCLCPP_WARN(this->get_logger(), "control_frequency=%.3f 非法，回退到 100.0", control_frequency_);
-            control_frequency_ = 100.0;
-        }
-        if (wheel_radius_ <= 0.0) {
-            RCLCPP_WARN(this->get_logger(), "wheel_radius=%.3f 非法，回退到 0.1062", wheel_radius_);
-            wheel_radius_ = 0.1062;
-        }
-        if (cmd_timeout_ <= 0.0) {
-            RCLCPP_WARN(this->get_logger(), "cmd_timeout=%.3f 非法，回退到 0.5", cmd_timeout_);
-            cmd_timeout_ = 0.5;
-        }
-        
-        // 初始化运动学
-        kinematics_ = std::make_unique<OmniWheelKinematics>(
-            wheel_base_x_, wheel_base_y_, wheel_radius_, install_angle_
-        );
-        
-        RCLCPP_INFO(this->get_logger(), 
-            "X 形全向轮底盘控制节点启动");
-        RCLCPP_INFO(this->get_logger(),
-            "轮距: %.3fm x %.3fm, 轮半径: %.3fm, 安装角: %.1f°",
-            wheel_base_x_, wheel_base_y_, wheel_radius_, install_angle_);
-        RCLCPP_INFO(this->get_logger(),
-            "电机映射: FL=%s, FR=%s, RL=%s, RR=%s",
-            motor_names_[0].c_str(), motor_names_[1].c_str(),
-            motor_names_[2].c_str(), motor_names_[3].c_str());
-        RCLCPP_INFO(this->get_logger(),
-            "驱动方向: FL=%d, FR=%d, RL=%d, RR=%d",
-            drive_directions_[0], drive_directions_[1], drive_directions_[2], drive_directions_[3]);
-        RCLCPP_INFO(this->get_logger(), "底盘速度输入: %s", cmd_vel_topic_.c_str());
-        
-        // 创建订阅者
-        cmd_vel_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
-            cmd_vel_topic_, 10,
-            std::bind(&OmniChassisControlNode::cmdVelCallback, this, std::placeholders::_1)
-        );
-        
-        // 创建发布者
-        motor_cmd_pub_ = this->create_publisher<motor_control_ros2::msg::DJIMotorCommandAdvanced>(
-            "/dji_motor_command_advanced", 10
-        );
+PIDParams loadPidParams(const YAML::Node& node, const PIDParams& defaults) {
+  PIDParams params = defaults;
+  if (node["kp"]) params.kp = node["kp"].as<double>();
+  if (node["ki"]) params.ki = node["ki"].as<double>();
+  if (node["kd"]) params.kd = node["kd"].as<double>();
+  if (node["i_max"]) params.i_max = node["i_max"].as<double>();
+  if (node["out_max"]) params.out_max = node["out_max"].as<double>();
+  if (node["dead_zone"]) params.dead_zone = node["dead_zone"].as<double>();
+  return params;
+}
 
-        // 创建控制循环定时器
-        auto period = std::chrono::duration<double>(1.0 / control_frequency_);
-        control_timer_ = this->create_wall_timer(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(period),
-            std::bind(&OmniChassisControlNode::controlLoop, this)
-        );
-        
-        last_cmd_time_ = this->now();
-        
-        RCLCPP_INFO(this->get_logger(), 
-            "控制循环启动 - 频率: %.1f Hz", control_frequency_);
-    }
+}  // namespace
 
-private:
-    std::string resolveControlParamsFile() {
-        std::string config_file = this->get_parameter("config_file").as_string();
-        if (!config_file.empty()) {
-            return config_file;
-        }
-
-        return ament_index_cpp::get_package_share_directory("motor_control_ros2") +
-            "/config/omni_chassis_params.yaml";
-    }
-
-    void loadControlParams(const std::string & control_params_file) {
-        RCLCPP_INFO(this->get_logger(), "正在加载全向轮底盘参数: %s", control_params_file.c_str());
-
-        YAML::Node root = YAML::LoadFile(control_params_file);
-        YAML::Node params = root;
-        if (root["omni_chassis_control_node"] && root["omni_chassis_control_node"]["ros__parameters"]) {
-            params = root["omni_chassis_control_node"]["ros__parameters"];
-        }
-
-        auto loadString = [&params](const char * key, std::string & value) {
-            if (params[key]) {
-                value = params[key].as<std::string>();
-            }
-        };
-
-        auto loadDouble = [&params](const char * key, double & value) {
-            if (params[key]) {
-                value = params[key].as<double>();
-            }
-        };
-
-        auto loadInt = [&params](const char * key, int & value) {
-            if (params[key]) {
-                value = params[key].as<int>();
-            }
-        };
-
-        loadDouble("control_frequency", control_frequency_);
-        loadDouble("wheel_base_x", wheel_base_x_);
-        loadDouble("wheel_base_y", wheel_base_y_);
-        loadDouble("wheel_radius", wheel_radius_);
-        loadDouble("install_angle", install_angle_);
-        loadDouble("max_linear_velocity", max_linear_velocity_);
-        loadDouble("max_angular_velocity", max_angular_velocity_);
-        loadDouble("cmd_timeout", cmd_timeout_);
-        loadString("cmd_vel_topic", cmd_vel_topic_);
-
-        loadString("fl_motor", motor_names_[0]);
-        loadString("fr_motor", motor_names_[1]);
-        loadString("rl_motor", motor_names_[2]);
-        loadString("rr_motor", motor_names_[3]);
-
-        loadInt("fl_drive_direction", drive_directions_[0]);
-        loadInt("fr_drive_direction", drive_directions_[1]);
-        loadInt("rl_drive_direction", drive_directions_[2]);
-        loadInt("rr_drive_direction", drive_directions_[3]);
-
-        RCLCPP_INFO(this->get_logger(), "omni_chassis_control_node 参数加载完成: %s", control_params_file.c_str());
-    }
-
-    // 底盘速度命令回调
-    void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
-        // 限制速度
-        cmd_vx_ = std::clamp(msg->linear.x, -max_linear_velocity_, max_linear_velocity_);
-        cmd_vy_ = std::clamp(msg->linear.y, -max_linear_velocity_, max_linear_velocity_);
-        cmd_wz_ = std::clamp(msg->angular.z, -max_angular_velocity_, max_angular_velocity_);
-        
-        last_cmd_time_ = this->now();
-    }
-    
-    // 控制循环
-    void controlLoop() {
-        auto now = this->now();
-        
-        // 检查命令超时
-        if ((now - last_cmd_time_).seconds() > cmd_timeout_) {
-            cmd_vx_ = 0.0;
-            cmd_vy_ = 0.0;
-            cmd_wz_ = 0.0;
-        }
-        
-        // 逆运动学解算：底盘速度 → 4 个轮子速度
-        // 注意：运动学代码使用的坐标系是 X向右，Y向前
-        // 而ROS标准是 X向前，Y向左
-        // 所以这里需要交换：ROS的vx(前后)对应运动学的vy，ROS的vy(左右)对应运动学的vx
-        // vy取反以匹配左右方向
-        auto wheel_velocities = kinematics_->inverseKinematics(-cmd_vy_, cmd_vx_, cmd_wz_);
-        
-        // 转换为电机 RPM 并发布命令
-        publishMotorCommands(wheel_velocities, now);
-    }
-    
-    // 发布电机命令
-    void publishMotorCommands(const std::array<double, 4>& wheel_velocities, 
-                              const rclcpp::Time& timestamp) {
-        for (size_t i = 0; i < 4; ++i) {
-            // 将轮子线速度转换为电机角速度 (rad/s)
-            double wheel_angular_vel = wheel_velocities[i] / kinematics_->getWheelRadius();
-            // 考虑减速比转换为电机角速度
-            double motor_angular_vel = wheel_angular_vel * 19.0 * static_cast<double>(drive_directions_[i]);  // GM3508 减速比 19:1
-            
-            auto msg = motor_control_ros2::msg::DJIMotorCommandAdvanced();
-            msg.header.stamp = timestamp;
-            msg.joint_name = motor_names_[i];
-            msg.mode = motor_control_ros2::msg::DJIMotorCommandAdvanced::MODE_VELOCITY;
-            msg.velocity_target = motor_angular_vel;  // 弧度/秒（消息定义要求的单位）
-            
-            motor_cmd_pub_->publish(msg);
-        }
-    }
-    // 成员变量
-    std::unique_ptr<OmniWheelKinematics> kinematics_;
-    std::array<std::string, 4> motor_names_ {{"DJI3508_1", "DJI3508_2", "DJI3508_3", "DJI3508_4"}};  // [FL, FR, RL, RR]
-    std::array<int, 4> drive_directions_ {{1, 1, 1, 1}};  // [FL, FR, RL, RR]
-    std::string cmd_vel_topic_ {"/cmd_vel"};
-    
-    // 参数
-    double control_frequency_ {100.0};
-    double wheel_base_x_ {0.50};
-    double wheel_base_y_ {0.50};
-    double wheel_radius_ {0.1062};
-    double install_angle_ {45.0};
-    double max_linear_velocity_ {2.0};
-    double max_angular_velocity_ {3.14};
-    double cmd_timeout_ {0.5};
-    
-    // 底盘速度命令
-    double cmd_vx_ = 0.0;
-    double cmd_vy_ = 0.0;
-    double cmd_wz_ = 0.0;
-    rclcpp::Time last_cmd_time_;
-    // ROS 接口
-    rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
-    rclcpp::Publisher<motor_control_ros2::msg::DJIMotorCommandAdvanced>::SharedPtr motor_cmd_pub_;
-    rclcpp::TimerBase::SharedPtr control_timer_;
+enum class ChassisMode {
+  VELOCITY = 0,
+  POSITION = 1
 };
 
-} // namespace motor_control
+class OmniChassisControlNode : public rclcpp::Node {
+public:
+  OmniChassisControlNode() : Node("omni_chassis_control_node") {
+    this->declare_parameter("config_file", "");
+
+    const std::string config_file = resolveConfigFile();
+    loadConfig(config_file);
+    const std::string initial_mode =
+      this->declare_parameter<std::string>("control_mode", modeToString(mode_));
+    if (!setControlMode(initial_mode)) {
+      mode_ = ChassisMode::VELOCITY;
+    }
+
+    kinematics_ = std::make_unique<OmniWheelKinematics>(
+      wheel_base_x_, wheel_base_y_, wheel_radius_, install_angle_);
+
+    cmd_vel_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
+      cmd_vel_topic_, 20,
+      std::bind(&OmniChassisControlNode::cmdVelCallback, this, std::placeholders::_1));
+
+    cmd_pose_sub_ = this->create_subscription<geometry_msgs::msg::Pose2D>(
+      cmd_pose_topic_, 20,
+      std::bind(&OmniChassisControlNode::cmdPoseCallback, this, std::placeholders::_1));
+
+    odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+      odom_topic_, 50,
+      std::bind(&OmniChassisControlNode::odomCallback, this, std::placeholders::_1));
+
+    motor_cmd_pub_ = this->create_publisher<motor_control_ros2::msg::DJIMotorCommandAdvanced>(
+      "/dji_motor_command_advanced", 20);
+
+    param_cb_handle_ = this->add_on_set_parameters_callback(
+      std::bind(&OmniChassisControlNode::onSetParameters, this, std::placeholders::_1));
+
+    const auto period = std::chrono::duration<double>(1.0 / control_frequency_);
+    control_timer_ = this->create_wall_timer(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(period),
+      std::bind(&OmniChassisControlNode::controlLoop, this));
+
+    last_cmd_time_ = this->now();
+    last_pose_cmd_time_ = this->now();
+
+    RCLCPP_INFO(this->get_logger(),
+      "omni_chassis_control_node 启动: mode=%s cmd_vel=%s cmd_pose=%s odom=%s",
+      mode_ == ChassisMode::VELOCITY ? "velocity" : "position",
+      cmd_vel_topic_.c_str(), cmd_pose_topic_.c_str(), odom_topic_.c_str());
+  }
+
+private:
+  std::string resolveConfigFile() const {
+    const std::string config_file = this->get_parameter("config_file").as_string();
+    if (!config_file.empty()) {
+      return config_file;
+    }
+    return ament_index_cpp::get_package_share_directory("motor_control_ros2") +
+      "/config/omni_chassis_params.yaml";
+  }
+
+  void loadConfig(const std::string& config_file) {
+    const YAML::Node root = YAML::LoadFile(config_file);
+    YAML::Node params = root;
+    if (root["omni_chassis_control_node"] && root["omni_chassis_control_node"]["ros__parameters"]) {
+      params = root["omni_chassis_control_node"]["ros__parameters"];
+    }
+
+    auto loadString = [&params](const char* key, std::string& value) {
+      if (params[key]) value = params[key].as<std::string>();
+    };
+    auto loadDouble = [&params](const char* key, double& value) {
+      if (params[key]) value = params[key].as<double>();
+    };
+    auto loadInt = [&params](const char* key, int& value) {
+      if (params[key]) value = params[key].as<int>();
+    };
+
+    loadDouble("control_frequency", control_frequency_);
+    loadDouble("wheel_base_x", wheel_base_x_);
+    loadDouble("wheel_base_y", wheel_base_y_);
+    loadDouble("wheel_radius", wheel_radius_);
+    loadDouble("install_angle", install_angle_);
+    loadDouble("max_linear_velocity", max_linear_velocity_);
+    loadDouble("max_angular_velocity", max_angular_velocity_);
+    loadDouble("cmd_timeout", cmd_timeout_);
+    loadDouble("position_timeout", position_timeout_);
+    loadDouble("goal_tolerance_xy", goal_tolerance_xy_);
+    loadDouble("goal_tolerance_yaw", goal_tolerance_yaw_);
+
+    loadString("cmd_vel_topic", cmd_vel_topic_);
+    loadString("cmd_pose_topic", cmd_pose_topic_);
+    loadString("odom_topic", odom_topic_);
+
+    loadString("fl_motor", motor_names_[0]);
+    loadString("fr_motor", motor_names_[1]);
+    loadString("rl_motor", motor_names_[2]);
+    loadString("rr_motor", motor_names_[3]);
+
+    loadInt("fl_drive_direction", drive_directions_[0]);
+    loadInt("fr_drive_direction", drive_directions_[1]);
+    loadInt("rl_drive_direction", drive_directions_[2]);
+    loadInt("rr_drive_direction", drive_directions_[3]);
+
+    if (params["velocity_pid_x"]) {
+      velocity_pid_x_.setParams(loadPidParams(params["velocity_pid_x"], velocity_pid_x_.getParams()));
+    }
+    if (params["velocity_pid_y"]) {
+      velocity_pid_y_.setParams(loadPidParams(params["velocity_pid_y"], velocity_pid_y_.getParams()));
+    }
+    if (params["velocity_pid_yaw"]) {
+      velocity_pid_yaw_.setParams(loadPidParams(params["velocity_pid_yaw"], velocity_pid_yaw_.getParams()));
+    }
+    if (params["position_pid_x"]) {
+      position_pid_x_.setParams(loadPidParams(params["position_pid_x"], position_pid_x_.getParams()));
+    }
+    if (params["position_pid_y"]) {
+      position_pid_y_.setParams(loadPidParams(params["position_pid_y"], position_pid_y_.getParams()));
+    }
+    if (params["position_pid_yaw"]) {
+      position_pid_yaw_.setParams(loadPidParams(params["position_pid_yaw"], position_pid_yaw_.getParams()));
+    }
+
+    std::string default_mode = "velocity";
+    loadString("default_mode", default_mode);
+    mode_ = default_mode == "position" ? ChassisMode::POSITION : ChassisMode::VELOCITY;
+  }
+
+  std::string modeToString(ChassisMode mode) const {
+    return mode == ChassisMode::POSITION ? "position" : "velocity";
+  }
+
+  bool setControlMode(const std::string& value) {
+    if (value == "velocity") {
+      mode_ = ChassisMode::VELOCITY;
+      resetControllers();
+      return true;
+    }
+    if (value == "position") {
+      mode_ = ChassisMode::POSITION;
+      resetControllers();
+      return true;
+    }
+    return false;
+  }
+
+  rcl_interfaces::msg::SetParametersResult onSetParameters(
+    const std::vector<rclcpp::Parameter>& parameters)
+  {
+    rcl_interfaces::msg::SetParametersResult result;
+    result.successful = true;
+
+    for (const auto& parameter : parameters) {
+      if (parameter.get_name() == "control_mode") {
+        const auto value = parameter.as_string();
+        if (!setControlMode(value)) {
+          result.successful = false;
+          result.reason = "control_mode 只支持 velocity 或 position";
+          return result;
+        }
+      }
+    }
+
+    return result;
+  }
+
+  void resetControllers() {
+    velocity_pid_x_.reset();
+    velocity_pid_y_.reset();
+    velocity_pid_yaw_.reset();
+    position_pid_x_.reset();
+    position_pid_y_.reset();
+    position_pid_yaw_.reset();
+  }
+
+  void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
+    velocity_target_.linear.x = std::clamp(
+      msg->linear.x, -max_linear_velocity_, max_linear_velocity_);
+    velocity_target_.linear.y = std::clamp(
+      msg->linear.y, -max_linear_velocity_, max_linear_velocity_);
+    velocity_target_.angular.z = std::clamp(
+      msg->angular.z, -max_angular_velocity_, max_angular_velocity_);
+    last_cmd_time_ = this->now();
+  }
+
+  void cmdPoseCallback(const geometry_msgs::msg::Pose2D::SharedPtr msg) {
+    pose_target_ = *msg;
+    pose_target_.theta = normalizeAngle(pose_target_.theta);
+    last_pose_cmd_time_ = this->now();
+    has_pose_target_ = true;
+  }
+
+  void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg) {
+    latest_odom_ = *msg;
+    latest_yaw_ = yawFromQuaternion(msg->pose.pose.orientation);
+    last_odom_time_ = this->now();
+    has_odom_ = true;
+  }
+
+  double yawFromQuaternion(const geometry_msgs::msg::Quaternion& q) const {
+    const double siny_cosp = 2.0 * (q.w * q.z + q.x * q.y);
+    const double cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z);
+    return std::atan2(siny_cosp, cosy_cosp);
+  }
+
+  geometry_msgs::msg::Twist computeVelocityModeCommand() {
+    geometry_msgs::msg::Twist cmd;
+    const auto now = this->now();
+    if ((now - last_cmd_time_).seconds() > cmd_timeout_) {
+      return cmd;
+    }
+
+    if (!has_odom_ || (now - last_odom_time_).seconds() > cmd_timeout_) {
+      return cmd;
+    }
+
+    const auto& twist = latest_odom_.twist.twist;
+    cmd.linear.x = velocity_pid_x_.calculate(velocity_target_.linear.x, twist.linear.x);
+    cmd.linear.y = velocity_pid_y_.calculate(velocity_target_.linear.y, twist.linear.y);
+    cmd.angular.z = velocity_pid_yaw_.calculate(velocity_target_.angular.z, twist.angular.z);
+    clampCommand(cmd);
+    return cmd;
+  }
+
+  geometry_msgs::msg::Twist computePositionModeCommand() {
+    geometry_msgs::msg::Twist cmd;
+    const auto now = this->now();
+    if (!has_pose_target_ || !has_odom_) {
+      return cmd;
+    }
+    if ((now - last_pose_cmd_time_).seconds() > position_timeout_) {
+      return cmd;
+    }
+    if ((now - last_odom_time_).seconds() > cmd_timeout_) {
+      return cmd;
+    }
+
+    const double current_x = latest_odom_.pose.pose.position.x;
+    const double current_y = latest_odom_.pose.pose.position.y;
+    const double current_yaw = latest_yaw_;
+
+    const double error_x_world = pose_target_.x - current_x;
+    const double error_y_world = pose_target_.y - current_y;
+    const double error_yaw = normalizeAngle(pose_target_.theta - current_yaw);
+
+    if (std::hypot(error_x_world, error_y_world) < goal_tolerance_xy_ &&
+        std::abs(error_yaw) < goal_tolerance_yaw_) {
+      return cmd;
+    }
+
+    const double cos_yaw = std::cos(current_yaw);
+    const double sin_yaw = std::sin(current_yaw);
+    const double error_x_body = cos_yaw * error_x_world + sin_yaw * error_y_world;
+    const double error_y_body = -sin_yaw * error_x_world + cos_yaw * error_y_world;
+
+    const double target_vx = position_pid_x_.calculate(error_x_body, 0.0);
+    const double target_vy = position_pid_y_.calculate(error_y_body, 0.0);
+    const double target_wz = position_pid_yaw_.calculate(error_yaw, 0.0);
+
+    const auto& twist = latest_odom_.twist.twist;
+    cmd.linear.x = velocity_pid_x_.calculate(target_vx, twist.linear.x);
+    cmd.linear.y = velocity_pid_y_.calculate(target_vy, twist.linear.y);
+    cmd.angular.z = velocity_pid_yaw_.calculate(target_wz, twist.angular.z);
+    clampCommand(cmd);
+    return cmd;
+  }
+
+  void clampCommand(geometry_msgs::msg::Twist& cmd) const {
+    cmd.linear.x = std::clamp(cmd.linear.x, -max_linear_velocity_, max_linear_velocity_);
+    cmd.linear.y = std::clamp(cmd.linear.y, -max_linear_velocity_, max_linear_velocity_);
+    cmd.angular.z = std::clamp(cmd.angular.z, -max_angular_velocity_, max_angular_velocity_);
+  }
+
+  void controlLoop() {
+    geometry_msgs::msg::Twist chassis_cmd;
+    if (mode_ == ChassisMode::POSITION) {
+      chassis_cmd = computePositionModeCommand();
+    } else {
+      chassis_cmd = computeVelocityModeCommand();
+    }
+
+    const auto wheel_velocities = kinematics_->inverseKinematics(
+      chassis_cmd.linear.x, chassis_cmd.linear.y, chassis_cmd.angular.z);
+    publishMotorCommands(wheel_velocities, this->now());
+  }
+
+  void publishMotorCommands(
+    const std::array<double, 4>& wheel_velocities,
+    const rclcpp::Time& stamp)
+  {
+    for (size_t i = 0; i < wheel_velocities.size(); ++i) {
+      const double wheel_angular_vel = wheel_velocities[i] / kinematics_->getWheelRadius();
+      const double motor_angular_vel =
+        wheel_angular_vel * kinematics_->getGearRatio() * static_cast<double>(drive_directions_[i]);
+
+      auto msg = motor_control_ros2::msg::DJIMotorCommandAdvanced();
+      msg.header.stamp = stamp;
+      msg.joint_name = motor_names_[i];
+      msg.mode = motor_control_ros2::msg::DJIMotorCommandAdvanced::MODE_VELOCITY;
+      msg.velocity_target = motor_angular_vel;
+      motor_cmd_pub_->publish(msg);
+    }
+  }
+
+  std::unique_ptr<OmniWheelKinematics> kinematics_;
+
+  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::Pose2D>::SharedPtr cmd_pose_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+  rclcpp::Publisher<motor_control_ros2::msg::DJIMotorCommandAdvanced>::SharedPtr motor_cmd_pub_;
+  rclcpp::TimerBase::SharedPtr control_timer_;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_handle_;
+
+  std::array<std::string, 4> motor_names_ {{"DJI3508_1", "DJI3508_2", "DJI3508_3", "DJI3508_4"}};
+  std::array<int, 4> drive_directions_ {{1, 1, 1, 1}};
+
+  std::string cmd_vel_topic_ {"/cmd_vel"};
+  std::string cmd_pose_topic_ {"/cmd_pose"};
+  std::string odom_topic_ {"/odom"};
+
+  double control_frequency_ {100.0};
+  double wheel_base_x_ {0.88};
+  double wheel_base_y_ {0.88};
+  double wheel_radius_ {0.1062};
+  double install_angle_ {45.0};
+  double max_linear_velocity_ {2.0};
+  double max_angular_velocity_ {2.0};
+  double cmd_timeout_ {0.5};
+  double position_timeout_ {1.0};
+  double goal_tolerance_xy_ {0.02};
+  double goal_tolerance_yaw_ {0.05};
+
+  ChassisMode mode_ {ChassisMode::VELOCITY};
+  geometry_msgs::msg::Twist velocity_target_;
+  geometry_msgs::msg::Pose2D pose_target_;
+  bool has_pose_target_ {false};
+  bool has_odom_ {false};
+  nav_msgs::msg::Odometry latest_odom_;
+  double latest_yaw_ {0.0};
+  rclcpp::Time last_cmd_time_;
+  rclcpp::Time last_pose_cmd_time_;
+  rclcpp::Time last_odom_time_;
+
+  PIDController velocity_pid_x_;
+  PIDController velocity_pid_y_;
+  PIDController velocity_pid_yaw_;
+  PIDController position_pid_x_;
+  PIDController position_pid_y_;
+  PIDController position_pid_yaw_;
+};
+
+}  // namespace motor_control
 
 int main(int argc, char** argv) {
-    rclcpp::init(argc, argv);
-    auto node = std::make_shared<motor_control::OmniChassisControlNode>();
-    rclcpp::spin(node);
-    rclcpp::shutdown();
-    return 0;
+  rclcpp::init(argc, argv);
+  auto node = std::make_shared<motor_control::OmniChassisControlNode>();
+  rclcpp::spin(node);
+  rclcpp::shutdown();
+  return 0;
 }

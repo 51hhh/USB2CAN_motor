@@ -1,48 +1,77 @@
-# X 形全向轮底盘控制参数配置
-
 omni_chassis_control_node:
   ros__parameters:
-    # 控制频率
-    control_frequency: 100.0        # Hz
-
-    # 底盘速度输入 topic（通常接 cmd_vel_mux_node 的 output_topic）
+    control_frequency: 100.0
     cmd_vel_topic: "/cmd_vel"
-    
-    # 底盘机械参数
-    wheel_base_x: 0.88              # 前后轮距 (m)
-    wheel_base_y: 0.88              # 左右轮距 (m)
-    wheel_radius: 0.1062            # 轮子半径 (m) 根据2026-03测量校准(原0.075为6寸, 实车为8寸)
-    install_angle: 45.0             # 轮子安装角度 (度)，X 形布置为 45°
-    
-    # 速度限制
-    max_linear_velocity: 2.0      # 最大线速度 (m/s)
-    max_angular_velocity: 2.0     # 最大角速度 (rad/s)
-    
-    # 命令超时
-    cmd_timeout: 0.5                # 速度命令超时时间 (s)
-    
-    # 电机映射（4 个 GM3508）
-    fl_motor: "DJI3508_1"           # 左前电机
-    fr_motor: "DJI3508_2"           # 右前电机
-    rl_motor: "DJI3508_3"           # 左后电机
-    rr_motor: "DJI3508_4"           # 右后电机
+    cmd_pose_topic: "/cmd_pose"
+    odom_topic: "/odom"
+    default_mode: "velocity"
 
-    # 驱动方向（按当前实物测试，全向轮四驱保持同向）
+    wheel_base_x: 0.88
+    wheel_base_y: 0.88
+    wheel_radius: 0.1062
+    install_angle: 45.0
+
+    max_linear_velocity: 2.0
+    max_angular_velocity: 2.0
+    cmd_timeout: 0.5
+    position_timeout: 1.0
+    goal_tolerance_xy: 0.02
+    goal_tolerance_yaw: 0.05
+
+    fl_motor: "DJI3508_1"
+    fr_motor: "DJI3508_2"
+    rl_motor: "DJI3508_3"
+    rr_motor: "DJI3508_4"
+
     fl_drive_direction: 1
     fr_drive_direction: 1
     rl_drive_direction: 1
     rr_drive_direction: 1
 
-    # 注: /odom 由 positioning_bridge 读取 STM32 码盘后发布；本节点不再发布轮速积分里程计。
+    velocity_pid_x:
+      kp: 2.0
+      ki: 0.2
+      kd: 0.0
+      i_max: 1.0
+      out_max: 2.0
+      dead_zone: 0.0
 
-# 配置说明:
-# 1. wheel_base_x: 从底盘中心到前轮（或后轮）的距离 * 2
-# 2. wheel_base_y: 从底盘中心到左轮（或右轮）的距离 * 2
-# 3. wheel_radius: 全向轮的有效半径（主动轮半径，不是辊子半径）
-# 4. install_angle: 全向轮安装角度（相对于底盘坐标系），X 形布置为 45°
-#    注意：这是整个轮子的安装角度，与麦克纳姆轮的辊子角度不同
-# 5. 电机名称必须与 motors.yaml 中配置的电机名称一致
-# 
-# 重要：全向轮(Omni Wheel) ≠ 麦克纳姆轮(Mecanum Wheel)
-# - 全向轮：整个轮子以45°安装，轮上的小辊子垂直于主轴
-# - 麦克纳姆轮：轮子正向安装，但辊子相对主轴成45°角
+    velocity_pid_y:
+      kp: 2.0
+      ki: 0.2
+      kd: 0.0
+      i_max: 1.0
+      out_max: 2.0
+      dead_zone: 0.0
+
+    velocity_pid_yaw:
+      kp: 2.5
+      ki: 0.1
+      kd: 0.0
+      i_max: 1.0
+      out_max: 2.0
+      dead_zone: 0.0
+
+    position_pid_x:
+      kp: 1.2
+      ki: 0.0
+      kd: 0.0
+      i_max: 0.0
+      out_max: 1.0
+      dead_zone: 0.005
+
+    position_pid_y:
+      kp: 1.2
+      ki: 0.0
+      kd: 0.0
+      i_max: 0.0
+      out_max: 1.0
+      dead_zone: 0.005
+
+    position_pid_yaw:
+      kp: 2.0
+      ki: 0.0
+      kd: 0.0
+      i_max: 0.0
+      out_max: 1.5
+      dead_zone: 0.01
