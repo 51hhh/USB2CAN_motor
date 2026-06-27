@@ -1,6 +1,6 @@
 # positioning_monitor_node 说明
 
-`positioning_monitor_node` 是类似 `motor_monitor_node` 的终端监控节点，用来更方便地查看码盘定位、`/odom`、`/odom_wheels` 和 `positioning_bridge` 诊断状态。
+`positioning_monitor_node` 是类似 `motor_monitor_node` 的终端监控节点，用来更方便地查看码盘定位、`/odom` 和 `positioning_bridge` 诊断状态。
 
 ## 作用
 
@@ -20,7 +20,6 @@ ros2 topic info /odom -v
 - 当前 `vx / vy / wz`；
 - 相邻帧位置跳变量 `step_xy`；
 - 最大跳变量 `max_step_xy`；
-- `/odom_wheels` 是否在线；
 - `positioning_bridge` 诊断信息；
 - `time_sync_samples=0` 时提示 Host->STM32 上行可能不通。
 
@@ -50,7 +49,6 @@ ros2 run positioning_bridge_ros2 positioning_monitor_node
 
 ```text
 /odom        在线/超时/无数据  Hz
-/odom_wheels 在线/超时/无数据  Hz
 /diagnostics 在线/超时/无数据  Hz
 ```
 
@@ -101,12 +99,6 @@ frames_parse_error
 time_sync_locked
 time_sync_samples
 time_sync_rtt_us
-fusion_state
-fusion_alpha
-fusion_residual_xy_m
-fusion_residual_yaw_rad
-motor_twist_age_sec
-fusion_state_changes
 ```
 
 ## 参数
@@ -116,7 +108,6 @@ fusion_state_changes
 | 参数 | 默认值 | 说明 |
 |---|---:|---|
 | `odom_topic` | `/odom` | 最终定位 topic |
-| `wheel_odom_topic` | `/odom_wheels` | 轮速里程计 topic |
 | `diagnostics_topic` | `/diagnostics` | 诊断 topic |
 | `display_rate_hz` | `5.0` | 终端刷新频率 |
 | `stale_timeout_sec` | `0.5` | topic 超时判定 |
@@ -142,7 +133,7 @@ Hz 稳定
 step_xy 很小
 frames_ok 增加
 frames_parse_error 不增加
-fusion_state NORMAL
+serial_open true
 ```
 
 ### 多发布者问题

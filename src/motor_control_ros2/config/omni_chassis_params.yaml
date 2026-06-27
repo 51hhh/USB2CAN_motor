@@ -33,7 +33,7 @@ omni_chassis_control_node:
     rl_drive_direction: 1
     rr_drive_direction: 1
 
-    # 注: /odom 已迁移到 positioning_bridge (码盘 + 融合); 本节点固定发 /odom_wheels (twist 高质量) 供融合预测使用
+    # 注: /odom 由 positioning_bridge 读取 STM32 码盘后发布；本节点不再发布轮速积分里程计。
 
 # 配置说明:
 # 1. wheel_base_x: 从底盘中心到前轮（或后轮）的距离 * 2

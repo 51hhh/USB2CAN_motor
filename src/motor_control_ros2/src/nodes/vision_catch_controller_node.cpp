@@ -1,6 +1,6 @@
 #include <rclcpp/rclcpp.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
-#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/point_stamped.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 
@@ -41,6 +41,14 @@ public:
             RCLCPP_WARN(this->get_logger(), "max_linear_speed=%.3f 非法，回退到 1.0", max_linear_speed_);
             max_linear_speed_ = 1.0;
         }
+        if (accel_limit_ <= 0.0) {
+            RCLCPP_WARN(this->get_logger(), "accel_limit=%.3f 非法，回退到 2.0", accel_limit_);
+            accel_limit_ = 2.0;
+        }
+        if (decel_limit_ <= 0.0) {
+            RCLCPP_WARN(this->get_logger(), "decel_limit=%.3f 非法，回退到 3.0", decel_limit_);
+            decel_limit_ = 3.0;
+        }
         if (position_tolerance_ <= 0.0) {
             RCLCPP_WARN(this->get_logger(), "position_tolerance=%.3f 非法，回退到 0.05", position_tolerance_);
             position_tolerance_ = 0.05;
@@ -61,14 +69,18 @@ public:
             RCLCPP_WARN(this->get_logger(), "max_angular_speed=%.3f 非法，回退到 0.1", max_angular_speed_);
             max_angular_speed_ = 0.1;
         }
+        if (std::abs(yaw_cmd_sign_) <= 1e-6) {
+            RCLCPP_WARN(this->get_logger(), "yaw_cmd_sign=%.3f 非法，回退到 -1.0", yaw_cmd_sign_);
+            yaw_cmd_sign_ = -1.0;
+        }
         if (yaw_tolerance_rad_ < 0.0) {
             RCLCPP_WARN(this->get_logger(), "yaw_tolerance_rad=%.3f 非法，回退到 0.03", yaw_tolerance_rad_);
             yaw_tolerance_rad_ = 0.03;
         }
 
-        goal_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
-            goal_topic_, 10,
-            std::bind(&VisionCatchControllerNode::goalCallback, this, std::placeholders::_1));//接球目标订阅
+        goal_sub_ = this->create_subscription<geometry_msgs::msg::PointStamped>(
+            goal_topic_, rclcpp::SensorDataQoS(),
+            std::bind(&VisionCatchControllerNode::goalCallback, this, std::placeholders::_1));//接球目标订阅(BEST_EFFORT匹配视觉发布者)
         odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
             odom_topic_, 20,
             std::bind(&VisionCatchControllerNode::odomCallback, this, std::placeholders::_1));//里程计订阅
@@ -125,17 +137,26 @@ private:
         loadDouble("control_frequency", control_frequency_);
         loadDouble("approach_gain", approach_gain_);
         loadDouble("max_linear_speed", max_linear_speed_);
+        loadDouble("accel_limit", accel_limit_);
+        loadDouble("decel_limit", decel_limit_);
         loadDouble("position_tolerance", position_tolerance_);
         loadDouble("goal_timeout_sec", goal_timeout_sec_);
         loadDouble("odom_timeout_sec", odom_timeout_sec_);
         loadDouble("yaw_kp", yaw_kp_);
         loadDouble("max_angular_speed", max_angular_speed_);
+        loadDouble("yaw_cmd_sign", yaw_cmd_sign_);
         loadDouble("yaw_tolerance_rad", yaw_tolerance_rad_);
         if (params["yaw_hold_enabled"]) {
             yaw_hold_enabled_ = params["yaw_hold_enabled"].as<bool>();
         }
         if (params["use_goal_yaw"]) {
             use_goal_yaw_ = params["use_goal_yaw"].as<bool>();
+        }
+        if (params["speed_profile_enabled"]) {
+            speed_profile_enabled_ = params["speed_profile_enabled"].as<bool>();
+        }
+        if (params["rotate_after_position_reached"]) {
+            rotate_after_position_reached_ = params["rotate_after_position_reached"].as<bool>();
         }
 
         RCLCPP_INFO(this->get_logger(), "vision_catch_controller_node 参数加载完成: %s", config_file.c_str());
@@ -157,11 +178,32 @@ private:
         return angle;
     }
 
+    static bool sameGoalPosition(
+        const geometry_msgs::msg::PointStamped & lhs,
+        const geometry_msgs::msg::PointStamped & rhs) {
+        constexpr double same_position_epsilon = 1e-6;
+        return std::abs(lhs.point.x - rhs.point.x) <= same_position_epsilon &&
+            std::abs(lhs.point.y - rhs.point.y) <= same_position_epsilon;
+    }
+
     geometry_msgs::msg::Twist zeroTwist() const {
         return geometry_msgs::msg::Twist();
     }
 
-    void    goalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+    void initializeYawHoldFromCurrentOdom(const char * reason) {
+        if (!has_odom_) {
+            return;
+        }
+
+        target_yaw_ = yawFromQuaternion(latest_odom_.pose.pose.orientation);
+        target_yaw_initialized_ = true;
+        RCLCPP_INFO(this->get_logger(), "yaw 保持目标初始化(%s): %.3f rad", reason, target_yaw_);
+    }
+
+    void goalCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg) {
+        const bool first_goal = !has_goal_;
+        const bool goal_position_changed = has_goal_ && !sameGoalPosition(*msg, latest_goal_);
+
         latest_goal_ = *msg;
         last_goal_time_ = this->now();
         has_goal_ = true;
@@ -174,12 +216,12 @@ private:
         }
 
         RCLCPP_INFO(this->get_logger(), "更新接球目标: x=%.3f y=%.3f",
-            msg->pose.position.x, msg->pose.position.y);
+            msg->point.x, msg->point.y);
 
-        if (yaw_hold_enabled_ && use_goal_yaw_) {
-            target_yaw_ = yawFromQuaternion(msg->pose.orientation);
-            target_yaw_initialized_ = true;
-            RCLCPP_INFO(this->get_logger(), "更新目标 yaw: %.3f rad", target_yaw_);
+        // PointStamped 不含 orientation，yaw 保持由 odom 初始化
+        if (yaw_hold_enabled_ &&
+            (first_goal || goal_position_changed || !target_yaw_initialized_)) {
+            initializeYawHoldFromCurrentOdom("当前目标");
         }
     }
 
@@ -188,10 +230,8 @@ private:
         last_odom_time_ = this->now();
         has_odom_ = true;
 
-        if (yaw_hold_enabled_ && !target_yaw_initialized_) {
-            target_yaw_ = yawFromQuaternion(msg->pose.pose.orientation);
-            target_yaw_initialized_ = true;
-            RCLCPP_INFO(this->get_logger(), "yaw 保持目标初始化: %.3f rad", target_yaw_);
+        if (yaw_hold_enabled_ && !use_goal_yaw_ && has_goal_ && !target_yaw_initialized_) {
+            initializeYawHoldFromCurrentOdom("首帧可用 /odom");
         }
     }
 
@@ -205,11 +245,89 @@ private:
             return 0.0;
         }
 
-        return std::clamp(yaw_kp_ * yaw_error, -max_angular_speed_, max_angular_speed_);
+        const double yaw_cmd = std::clamp(yaw_kp_ * yaw_error, -max_angular_speed_, max_angular_speed_);
+        return yaw_cmd_sign_ * yaw_cmd;
+    }
+
+    double calculateControlDt(const rclcpp::Time & now) {
+        double dt = 1.0 / control_frequency_;//时间间隔
+        if (last_control_time_.nanoseconds() > 0) {
+            dt = (now - last_control_time_).seconds();
+            if (dt <= 0.0) {
+                dt = 1.0 / control_frequency_;
+            }
+        }
+        last_control_time_ = now;
+        return dt;
+    }
+
+    double computeProfileSpeed(double distance, double dt) const {
+        if (!speed_profile_enabled_) {
+            return std::min(max_linear_speed_, approach_gain_ * distance);
+        }
+
+        const double remaining_distance = std::max(0.0, distance - position_tolerance_);
+        const double brake_limited_speed = std::sqrt(2.0 * decel_limit_ * remaining_distance);
+        const double target_speed = std::min(max_linear_speed_, brake_limited_speed);
+        const double current_speed = std::hypot(last_cmd_linear_x_, last_cmd_linear_y_);
+
+        if (target_speed > current_speed) {
+            return std::min(target_speed, current_speed + accel_limit_ * dt);
+        }
+        return std::max(target_speed, current_speed - decel_limit_ * dt);
+    }
+
+    void limitLinearCommand(
+        double target_x,
+        double target_y,
+        double dt,
+        double & limited_x,
+        double & limited_y) const {
+        if (!speed_profile_enabled_) {
+            limited_x = target_x;
+            limited_y = target_y;
+            return;
+        }
+
+        const double delta_x = target_x - last_cmd_linear_x_;
+        const double delta_y = target_y - last_cmd_linear_y_;
+        const double delta_norm = std::hypot(delta_x, delta_y);
+        if (delta_norm <= 0.0) {
+            limited_x = target_x;
+            limited_y = target_y;
+            return;
+        }
+
+        const double current_speed = std::hypot(last_cmd_linear_x_, last_cmd_linear_y_);
+        const double target_speed = std::hypot(target_x, target_y);
+        const double limit = ((target_speed > current_speed) ? accel_limit_ : decel_limit_) * dt;
+        if (delta_norm <= limit) {
+            limited_x = target_x;
+            limited_y = target_y;
+            return;
+        }
+
+        const double scale = limit / delta_norm;
+        limited_x = last_cmd_linear_x_ + delta_x * scale;
+        limited_y = last_cmd_linear_y_ + delta_y * scale;
+    }
+
+    void resetSpeedProfile() {
+        last_cmd_linear_x_ = 0.0;
+        last_cmd_linear_y_ = 0.0;
+        last_control_time_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
     }
 
     void controlLoop() {
-        if (!has_goal_ || !has_odom_) {
+        if ( !has_odom_) {
+            resetSpeedProfile();
+            RCLCPP_ERROR(this->get_logger(), "缺少里程计信息，无法控制，停车等待");
+            publishCommand(zeroTwist());
+            return;
+        }
+         if (!has_goal_ ) {
+            resetSpeedProfile();
+            RCLCPP_ERROR(this->get_logger(), "缺少接球目标信息，无法控制，停车等待");
             publishCommand(zeroTwist());
             return;
         }
@@ -220,6 +338,7 @@ private:
                 RCLCPP_WARN(this->get_logger(), "目标超时，停车等待新落点");
                 goal_timeout_reported_ = true;
             }
+            resetSpeedProfile();
             publishCommand(zeroTwist());
             return;
         }
@@ -230,10 +349,12 @@ private:
                 RCLCPP_WARN(this->get_logger(), "/odom 超时，停车等待位姿恢复");
                 odom_timeout_reported_ = true;
             }
+            resetSpeedProfile();
             publishCommand(zeroTwist());
             return;
         }
         odom_timeout_reported_ = false;
+        const double dt = calculateControlDt(now);
 
         const double current_x = latest_odom_.pose.pose.position.x;
         const double current_y = latest_odom_.pose.pose.position.y;
@@ -241,8 +362,8 @@ private:
         const double current_yaw = yawFromQuaternion(latest_odom_.pose.pose.orientation);
         const double yaw_cmd = computeYawCommand(current_yaw);
 
-        const double dx_world = latest_goal_.pose.position.x - current_x;
-        const double dy_world = latest_goal_.pose.position.y - current_y;
+        const double dx_world = latest_goal_.point.x - current_x;
+        const double dy_world = latest_goal_.point.y - current_y;
         const double distance = std::hypot(dx_world, dy_world);
 
         if (distance <= position_tolerance_) {
@@ -250,8 +371,9 @@ private:
                 RCLCPP_INFO(this->get_logger(), "已到达接球等待点，进入停车等待");
                 reached_goal_ = true;
             }
+            resetSpeedProfile();
             geometry_msgs::msg::Twist cmd;
-            cmd.angular.z = yaw_cmd;
+            cmd.angular.z = rotate_after_position_reached_ ? yaw_cmd : 0.0;
             publishCommand(cmd);
             return;
         }
@@ -261,12 +383,15 @@ private:
         const double ey_body = -std::sin(current_yaw) * dx_world + std::cos(current_yaw) * dy_world;
         const double heading_error = normalizeAngle(std::atan2(ey_body, ex_body));
 
-        const double speed = std::min(max_linear_speed_, approach_gain_ * distance);
+        const double speed = computeProfileSpeed(distance, dt);
+        const double target_linear_x = speed * std::cos(heading_error);
+        const double target_linear_y = speed * std::sin(heading_error);
 
         geometry_msgs::msg::Twist cmd;
-        cmd.linear.x = speed * std::cos(heading_error);
-        cmd.linear.y = speed * std::sin(heading_error);
+        limitLinearCommand(target_linear_x, target_linear_y, dt, cmd.linear.x, cmd.linear.y);
         cmd.angular.z = yaw_cmd;
+        last_cmd_linear_x_ = cmd.linear.x;
+        last_cmd_linear_y_ = cmd.linear.y;
 
         publishCommand(cmd);
     }
@@ -275,21 +400,26 @@ private:
         cmd_vel_pub_->publish(cmd);
     }
 
-    std::string goal_topic_ {"/auto/goal_pose"};
-    std::string odom_topic_ {"/odom_wheels"};
+    std::string goal_topic_ {"/ball/landing"};
+    std::string odom_topic_ {"/odom"};
     std::string cmd_vel_topic_ {"/cmd_vel_remote"};
     std::string goal_frame_ {"vision_world"};
 
     double control_frequency_ {50.0};
     double approach_gain_ {1.0};
     double max_linear_speed_ {1.0};
+    double accel_limit_ {2.0};
+    double decel_limit_ {3.0};
     double position_tolerance_ {0.05};
     double goal_timeout_sec_ {1.0};
     double odom_timeout_sec_ {0.5};
-    bool yaw_hold_enabled_ {true};
+    bool speed_profile_enabled_ {true};
+    bool yaw_hold_enabled_ {false};
     bool use_goal_yaw_ {false};
+    bool rotate_after_position_reached_ {true};
     double yaw_kp_ {1.5};
     double max_angular_speed_ {0.1};
+    double yaw_cmd_sign_ {-1.0};
     double yaw_tolerance_rad_ {0.03};
     double target_yaw_ {0.0};
 
@@ -299,13 +429,16 @@ private:
     bool target_yaw_initialized_ {false};
     bool goal_timeout_reported_ {false};
     bool odom_timeout_reported_ {false};
+    double last_cmd_linear_x_ {0.0};
+    double last_cmd_linear_y_ {0.0};
 
-    geometry_msgs::msg::PoseStamped latest_goal_;
+    geometry_msgs::msg::PointStamped latest_goal_;
     nav_msgs::msg::Odometry latest_odom_;
     rclcpp::Time last_goal_time_;
     rclcpp::Time last_odom_time_;
+    rclcpp::Time last_control_time_ {0, 0, RCL_ROS_TIME};
 
-    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr goal_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
     rclcpp::TimerBase::SharedPtr control_timer_;
