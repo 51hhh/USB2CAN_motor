@@ -1,0 +1,104 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Time
+    Name: Time
+  - Class: rviz_common/Tool Properties
+    Name: Tool Properties
+
+Visualization Manager:
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Reference Frame: odom
+      Plane Cell Count: 50
+      Cell Size: 0.5
+      Color: 160; 160; 164
+      Enabled: true
+
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Frame Timeout: 15
+      Frames:
+        All Enabled: true
+      Show Axes: true
+      Show Names: true
+
+    - Class: rviz_default_plugins/Odometry
+      Name: MCU Odometry
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /odom
+      Enabled: true
+      Keep: 100
+      Position Tolerance: 0.1
+      Angle Tolerance: 0.1
+      Shape:
+        Alpha: 1.0
+        Axes Length: 0.3
+        Axes Radius: 0.03
+        Color: 255; 25; 0
+        Head Length: 0.2
+        Head Radius: 0.1
+        Shaft Length: 0.5
+        Shaft Radius: 0.05
+        Value: Arrow
+      Covariance:
+        Orientation:
+          Alpha: 0.5
+          Color: 255; 255; 127
+          Color Style: Unique
+          Frame: Local
+          Offset: 1
+          Scale: 1
+          Value: false
+        Position:
+          Alpha: 0.3
+          Color: 204; 51; 204
+          Scale: 1
+          Value: false
+
+    - Class: rviz_default_plugins/Axes
+      Name: Base Link Axes
+      Enabled: true
+      Reference Frame: base_link
+      Length: 0.5
+      Radius: 0.05
+
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: odom
+    Frame Rate: 30
+
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+
+  Value: true
+
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Name: Current View
+      Near Clip Distance: 0.01
+      Scale: 100
+      Target Frame: base_link
+      Value: TopDownOrtho (rviz_default_plugins)
+      X: 0
+      Y: 0
+
+Window Geometry:
+  Height: 900
+  Width: 1400
+  X: 0
+  Y: 27
