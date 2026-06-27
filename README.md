@@ -4,6 +4,7 @@
 
 - `motor_control_ros2`: DJI 电机控制层 + 底盘控制层 + 手柄遥控层
 - `wheel_imu_ekf`: MCU `ODOM_STATE` 串口桥接层，发布 `/odom` 和 TF
+- `rviz_bag_tools`: rosbag 录制、交互回放和 RViz 查看工具，不参与底盘控制
 
 ## 当前控制结构
 
@@ -37,6 +38,13 @@ colcon build --packages-select motor_control_ros2 wheel_imu_ekf
 source install/setup.bash
 ```
 
+需要 rosbag/RViz 工具时额外构建：
+
+```bash
+colcon build --packages-select rviz_bag_tools
+source install/setup.bash
+```
+
 底盘启动脚本：
 
 ```bash
@@ -66,3 +74,13 @@ START_RVIZ=0 ./src/ROS_test/launch/start_chassis.sh
 - `/dji_motor_command_advanced`: 底层电机速度命令
 - `/dji_motor_states`: 电机状态
 - `/control_frequency`: 电机控制频率统计
+
+## Rosbag/RViz 调试工具
+
+`rviz_bag_tools` 支持两种模式：
+
+- 实时查看：只启动 RViz，读取当前 DDS 网络中的 `/odom` 和 TF。
+- 离线回放：读取下载到本机的 rosbag，默认发布 `/replay/odom`、`/replay/path` 和 `replay_odom -> replay_base_link`，不与真实底盘话题冲突。
+- 远程安全查看：可启用 live adapter，把远程 odom 转成 `/remote_view/odom` 和 `remote_odom -> remote_base_link`。
+
+配置文件位于 `src/rviz_bag_tools/config/chassis_bag.yaml`。

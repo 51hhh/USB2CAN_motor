@@ -1,0 +1,55 @@
+# Robot_1A rosbag/RViz tool configuration.
+#
+# Record mode stores the original topics in a rosbag.
+# Replay mode publishes to /replay/* by default so it cannot fight the live
+# chassis nodes on /odom, /cmd_vel, or TF frames.
+
+record:
+  output_root: "bags"
+  storage_id: "sqlite3"
+  include_hidden_topics: false
+  all: false
+  topics:
+    - name: "/odom"
+      type: "nav_msgs/msg/Odometry"
+      enabled: true
+    - name: "/cmd_vel"
+      type: "geometry_msgs/msg/Twist"
+      enabled: true
+    - name: "/dji_motor_states"
+      type: "motor_control_ros2/msg/DJIMotorState"
+      enabled: true
+    - name: "/control_frequency"
+      type: "motor_control_ros2/msg/ControlFrequency"
+      enabled: true
+
+replay:
+  remap_prefix: "/replay"
+  stamp_policy: "now"       # now | bag | preserve
+  speed: 1.0
+  loop: false
+  step_mode: "topic"        # message | topic | time
+  step_topic: "/odom"
+  step_time_sec: 1.0
+  skip_topics:
+    - "/tf"
+    - "/tf_static"
+  publish_tf_from_odom: true
+  topics:
+    - source: "/odom"
+      target: "/replay/odom"
+      enabled: true
+      frame_id: "replay_odom"
+      child_frame_id: "replay_base_link"
+      generate_path: true
+      path_topic: "/replay/path"
+      max_path_poses: 5000
+    - source: "/cmd_vel"
+      target: "/replay/cmd_vel"
+      enabled: true
+    - source: "/dji_motor_states"
+      target: "/replay/dji_motor_states"
+      enabled: true
+    - source: "/control_frequency"
+      target: "/replay/control_frequency"
+      enabled: true
