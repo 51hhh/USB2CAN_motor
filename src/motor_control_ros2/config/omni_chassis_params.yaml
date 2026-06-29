@@ -4,7 +4,11 @@ omni_chassis_control_node:
     cmd_vel_topic: "/cmd_vel"
     cmd_pose_topic: "/cmd_pose"
     odom_topic: "/odom"
+    estop_topic: "/chassis/estop"
     default_mode: "velocity"
+    # open_loop: 遥控速度直接做逆运动学输出轮速，暂不依赖 /odom.twist。
+    # closed_loop: 使用 /odom.twist 和 velocity_pid_* 做速度闭环。
+    velocity_control_mode: "open_loop"
 
     wheel_base_x: 0.88
     wheel_base_y: 0.88
@@ -14,6 +18,7 @@ omni_chassis_control_node:
     max_linear_velocity: 2.0
     max_angular_velocity: 2.0
     cmd_timeout: 0.5
+    zero_target_deadband: 0.001
     position_timeout: 1.0
     goal_tolerance_xy: 0.02
     goal_tolerance_yaw: 0.05

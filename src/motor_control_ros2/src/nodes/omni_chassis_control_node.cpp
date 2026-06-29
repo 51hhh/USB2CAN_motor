@@ -4,6 +4,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <rcl_interfaces/msg/set_parameters_result.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <std_msgs/msg/bool.hpp>
 
 #include <algorithm>
 #include <array>
@@ -50,6 +51,11 @@ enum class ChassisMode {
   POSITION = 1
 };
 
+enum class VelocityControlMode {
+  OPEN_LOOP = 0,
+  CLOSED_LOOP = 1
+};
+
 class OmniChassisControlNode : public rclcpp::Node {
 public:
   OmniChassisControlNode() : Node("omni_chassis_control_node") {
@@ -78,6 +84,10 @@ public:
       odom_topic_, 50,
       std::bind(&OmniChassisControlNode::odomCallback, this, std::placeholders::_1));
 
+    estop_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+      estop_topic_, 20,
+      std::bind(&OmniChassisControlNode::estopCallback, this, std::placeholders::_1));
+
     motor_cmd_pub_ = this->create_publisher<motor_control_ros2::msg::DJIMotorCommandAdvanced>(
       "/dji_motor_command_advanced", 20);
 
@@ -93,9 +103,10 @@ public:
     last_pose_cmd_time_ = this->now();
 
     RCLCPP_INFO(this->get_logger(),
-      "omni_chassis_control_node 启动: mode=%s cmd_vel=%s cmd_pose=%s odom=%s",
+      "omni_chassis_control_node 启动: mode=%s velocity_control=%s cmd_vel=%s cmd_pose=%s odom=%s estop=%s",
       mode_ == ChassisMode::VELOCITY ? "velocity" : "position",
-      cmd_vel_topic_.c_str(), cmd_pose_topic_.c_str(), odom_topic_.c_str());
+      velocity_control_mode_ == VelocityControlMode::OPEN_LOOP ? "open_loop" : "closed_loop",
+      cmd_vel_topic_.c_str(), cmd_pose_topic_.c_str(), odom_topic_.c_str(), estop_topic_.c_str());
   }
 
 private:
@@ -133,6 +144,7 @@ private:
     loadDouble("max_linear_velocity", max_linear_velocity_);
     loadDouble("max_angular_velocity", max_angular_velocity_);
     loadDouble("cmd_timeout", cmd_timeout_);
+    loadDouble("zero_target_deadband", zero_target_deadband_);
     loadDouble("position_timeout", position_timeout_);
     loadDouble("goal_tolerance_xy", goal_tolerance_xy_);
     loadDouble("goal_tolerance_yaw", goal_tolerance_yaw_);
@@ -140,6 +152,11 @@ private:
     loadString("cmd_vel_topic", cmd_vel_topic_);
     loadString("cmd_pose_topic", cmd_pose_topic_);
     loadString("odom_topic", odom_topic_);
+    loadString("estop_topic", estop_topic_);
+    std::string velocity_control_mode = "open_loop";
+    loadString("velocity_control_mode", velocity_control_mode);
+    velocity_control_mode_ =
+      velocity_control_mode == "closed_loop" ? VelocityControlMode::CLOSED_LOOP : VelocityControlMode::OPEN_LOOP;
 
     loadString("fl_motor", motor_names_[0]);
     loadString("fr_motor", motor_names_[1]);
@@ -246,6 +263,16 @@ private:
     has_odom_ = true;
   }
 
+  void estopCallback(const std_msgs::msg::Bool::SharedPtr msg) {
+    if (!msg) {
+      return;
+    }
+    estop_active_ = msg->data;
+    if (estop_active_) {
+      resetControllers();
+    }
+  }
+
   double yawFromQuaternion(const geometry_msgs::msg::Quaternion& q) const {
     const double siny_cosp = 2.0 * (q.w * q.z + q.x * q.y);
     const double cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z);
@@ -256,10 +283,32 @@ private:
     geometry_msgs::msg::Twist cmd;
     const auto now = this->now();
     if ((now - last_cmd_time_).seconds() > cmd_timeout_) {
+      velocity_pid_x_.reset();
+      velocity_pid_y_.reset();
+      velocity_pid_yaw_.reset();
+      return cmd;
+    }
+
+    if (isZeroVelocityTarget()) {
+      velocity_pid_x_.reset();
+      velocity_pid_y_.reset();
+      velocity_pid_yaw_.reset();
+      return cmd;
+    }
+
+    if (velocity_control_mode_ == VelocityControlMode::OPEN_LOOP) {
+      cmd = velocity_target_;
+      clampCommand(cmd);
+      velocity_pid_x_.reset();
+      velocity_pid_y_.reset();
+      velocity_pid_yaw_.reset();
       return cmd;
     }
 
     if (!has_odom_ || (now - last_odom_time_).seconds() > cmd_timeout_) {
+      velocity_pid_x_.reset();
+      velocity_pid_y_.reset();
+      velocity_pid_yaw_.reset();
       return cmd;
     }
 
@@ -320,7 +369,19 @@ private:
     cmd.angular.z = std::clamp(cmd.angular.z, -max_angular_velocity_, max_angular_velocity_);
   }
 
+  bool isZeroVelocityTarget() const {
+    return std::abs(velocity_target_.linear.x) <= zero_target_deadband_ &&
+      std::abs(velocity_target_.linear.y) <= zero_target_deadband_ &&
+      std::abs(velocity_target_.angular.z) <= zero_target_deadband_;
+  }
+
   void controlLoop() {
+    if (estop_active_) {
+      resetControllers();
+      publishMotorCommands({0.0, 0.0, 0.0, 0.0}, this->now());
+      return;
+    }
+
     geometry_msgs::msg::Twist chassis_cmd;
     if (mode_ == ChassisMode::POSITION) {
       chassis_cmd = computePositionModeCommand();
@@ -356,6 +417,7 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Pose2D>::SharedPtr cmd_pose_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr estop_sub_;
   rclcpp::Publisher<motor_control_ros2::msg::DJIMotorCommandAdvanced>::SharedPtr motor_cmd_pub_;
   rclcpp::TimerBase::SharedPtr control_timer_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_handle_;
@@ -366,6 +428,7 @@ private:
   std::string cmd_vel_topic_ {"/cmd_vel"};
   std::string cmd_pose_topic_ {"/cmd_pose"};
   std::string odom_topic_ {"/odom"};
+  std::string estop_topic_ {"/chassis/estop"};
 
   double control_frequency_ {100.0};
   double wheel_base_x_ {0.88};
@@ -375,11 +438,14 @@ private:
   double max_linear_velocity_ {2.0};
   double max_angular_velocity_ {2.0};
   double cmd_timeout_ {0.5};
+  double zero_target_deadband_ {1e-3};
   double position_timeout_ {1.0};
   double goal_tolerance_xy_ {0.02};
   double goal_tolerance_yaw_ {0.05};
 
   ChassisMode mode_ {ChassisMode::VELOCITY};
+  VelocityControlMode velocity_control_mode_ {VelocityControlMode::OPEN_LOOP};
+  bool estop_active_ {true};
   geometry_msgs::msg::Twist velocity_target_;
   geometry_msgs::msg::Pose2D pose_target_;
   bool has_pose_target_ {false};

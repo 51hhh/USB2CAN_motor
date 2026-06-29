@@ -12,7 +12,6 @@ find_package(nav_msgs REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
-find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(yaml-cpp REQUIRED)
 
@@ -66,15 +65,15 @@ ament_target_dependencies(omni_chassis_control_node
   nav_msgs
   rcl_interfaces
   rclcpp
+  std_msgs
 )
 
-add_executable(joystick_control_node
-  src/nodes/joystick_control_node.cpp
+add_executable(rc_usb_control_node
+  src/nodes/rc_usb_control_node.cpp
 )
-ament_target_dependencies(joystick_control_node
+ament_target_dependencies(rc_usb_control_node
   geometry_msgs
   rclcpp
-  sensor_msgs
   std_msgs
 )
 
@@ -82,7 +81,7 @@ install(TARGETS
   motor_control_lib
   motor_control_node
   omni_chassis_control_node
-  joystick_control_node
+  rc_usb_control_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}
