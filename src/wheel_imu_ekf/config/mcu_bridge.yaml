@@ -3,7 +3,7 @@
 mcu_odom_bridge_node:
   ros__parameters:
     # 串口配置
-    serial_port: "/dev/ttyUSB0"
+    serial_port: "/dev/robocon_odom"
     baud_rate: 115200
 
     # ROS话题

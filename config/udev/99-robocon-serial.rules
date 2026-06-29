@@ -1,0 +1,15 @@
+# Robocon chassis serial devices.
+#
+# Install on the robot with:
+#   sudo cp config/udev/99-robocon-serial.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+
+# USB2CAN adapter for DJI 3508 motor control.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2e88", ATTRS{idProduct}=="4603", SYMLINK+="robocon_usb2can", MODE="0666", GROUP="dialout"
+
+# STM32 USB CDC forwarding DJI DBUS remote-control frames.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", SYMLINK+="robocon_rc", MODE="0666", GROUP="dialout"
+
+# QinHeng USB serial adapter carrying encoder/odometry data.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7522", SYMLINK+="robocon_odom", MODE="0666", GROUP="dialout"

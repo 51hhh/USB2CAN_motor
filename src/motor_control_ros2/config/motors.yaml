@@ -1,5 +1,5 @@
 can_interfaces:
-- device: /dev/ttyACM0
+- device: /dev/robocon_usb2can
   baudrate: 921600
   motors:
   - name: DJI3508_1
