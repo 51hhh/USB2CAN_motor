@@ -22,6 +22,11 @@ omni_chassis_control_node:
     cmd_timeout: 0.5
     zero_target_deadband: 0.001
     yaw_feedback_sign: -1.0
+    yaw_hold_enabled: true
+    yaw_hold_kp: 1.8
+    yaw_hold_max_angular_velocity: 0.8
+    yaw_hold_deadband: 0.015
+    yaw_hold_release_angular_velocity: 0.05
     position_timeout: 1.0
     goal_tolerance_xy: 0.02
     goal_tolerance_yaw: 0.05

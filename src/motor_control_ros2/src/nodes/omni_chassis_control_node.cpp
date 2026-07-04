@@ -135,6 +135,9 @@ private:
     auto loadInt = [&params](const char* key, int& value) {
       if (params[key]) value = params[key].as<int>();
     };
+    auto loadBool = [&params](const char* key, bool& value) {
+      if (params[key]) value = params[key].as<bool>();
+    };
 
     loadDouble("control_frequency", control_frequency_);
     loadDouble("wheel_base_x", wheel_base_x_);
@@ -147,6 +150,11 @@ private:
     loadDouble("cmd_timeout", cmd_timeout_);
     loadDouble("zero_target_deadband", zero_target_deadband_);
     loadDouble("yaw_feedback_sign", yaw_feedback_sign_);
+    loadBool("yaw_hold_enabled", yaw_hold_enabled_);
+    loadDouble("yaw_hold_kp", yaw_hold_kp_);
+    loadDouble("yaw_hold_max_angular_velocity", yaw_hold_max_angular_velocity_);
+    loadDouble("yaw_hold_deadband", yaw_hold_deadband_);
+    loadDouble("yaw_hold_release_angular_velocity", yaw_hold_release_angular_velocity_);
     loadDouble("position_timeout", position_timeout_);
     loadDouble("goal_tolerance_xy", goal_tolerance_xy_);
     loadDouble("goal_tolerance_yaw", goal_tolerance_yaw_);
@@ -192,6 +200,11 @@ private:
     std::string default_mode = "velocity";
     loadString("default_mode", default_mode);
     mode_ = default_mode == "position" ? ChassisMode::POSITION : ChassisMode::VELOCITY;
+
+    yaw_hold_kp_ = std::abs(yaw_hold_kp_);
+    yaw_hold_max_angular_velocity_ = std::abs(yaw_hold_max_angular_velocity_);
+    yaw_hold_deadband_ = std::max(0.0, yaw_hold_deadband_);
+    yaw_hold_release_angular_velocity_ = std::max(0.0, yaw_hold_release_angular_velocity_);
   }
 
   std::string modeToString(ChassisMode mode) const {
@@ -239,6 +252,40 @@ private:
     position_pid_x_.reset();
     position_pid_y_.reset();
     position_pid_yaw_.reset();
+    has_yaw_hold_reference_ = false;
+    last_yaw_hold_error_ = 0.0;
+  }
+
+  double applyYawHold(double requested_wz, bool fresh_odom) {
+    if (!yaw_hold_enabled_ || !fresh_odom) {
+      has_yaw_hold_reference_ = false;
+      last_yaw_hold_error_ = 0.0;
+      return requested_wz;
+    }
+
+    if (std::abs(requested_wz) > yaw_hold_release_angular_velocity_) {
+      yaw_hold_reference_ = latest_yaw_;
+      has_yaw_hold_reference_ = true;
+      last_yaw_hold_error_ = 0.0;
+      return requested_wz;
+    }
+
+    if (!has_yaw_hold_reference_) {
+      yaw_hold_reference_ = latest_yaw_;
+      has_yaw_hold_reference_ = true;
+    }
+
+    const double yaw_error = normalizeAngle(yaw_hold_reference_ - latest_yaw_);
+    last_yaw_hold_error_ = yaw_error;
+    if (std::abs(yaw_error) <= yaw_hold_deadband_) {
+      return 0.0;
+    }
+
+    const double desired_odom_wz = yaw_hold_kp_ * yaw_error;
+    return std::clamp(
+      yaw_feedback_sign_ * desired_odom_wz,
+      -yaw_hold_max_angular_velocity_,
+      yaw_hold_max_angular_velocity_);
   }
 
   void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
@@ -288,10 +335,18 @@ private:
       velocity_pid_x_.reset();
       velocity_pid_y_.reset();
       velocity_pid_yaw_.reset();
+      has_yaw_hold_reference_ = false;
+      last_yaw_hold_error_ = 0.0;
       return cmd;
     }
 
-    if (isZeroVelocityTarget()) {
+    const bool fresh_odom =
+      has_odom_ && ((now - last_odom_time_).seconds() <= cmd_timeout_);
+
+    geometry_msgs::msg::Twist target = velocity_target_;
+    target.angular.z = applyYawHold(target.angular.z, fresh_odom);
+
+    if (isZeroVelocityTarget(target)) {
       velocity_pid_x_.reset();
       velocity_pid_y_.reset();
       velocity_pid_yaw_.reset();
@@ -299,7 +354,7 @@ private:
     }
 
     if (velocity_control_mode_ == VelocityControlMode::OPEN_LOOP) {
-      cmd = velocity_target_;
+      cmd = target;
       clampCommand(cmd);
       velocity_pid_x_.reset();
       velocity_pid_y_.reset();
@@ -307,7 +362,7 @@ private:
       return cmd;
     }
 
-    if (!has_odom_ || (now - last_odom_time_).seconds() > cmd_timeout_) {
+    if (!fresh_odom) {
       velocity_pid_x_.reset();
       velocity_pid_y_.reset();
       velocity_pid_yaw_.reset();
@@ -318,16 +373,17 @@ private:
     const double feedback_right = -twist.linear.y;
     const double feedback_forward = twist.linear.x;
     const double feedback_yaw = yaw_feedback_sign_ * twist.angular.z;
-    cmd = velocity_target_;
-    cmd.linear.x += velocity_pid_x_.calculate(velocity_target_.linear.x, feedback_right);
-    cmd.linear.y += velocity_pid_y_.calculate(velocity_target_.linear.y, feedback_forward);
-    cmd.angular.z += velocity_pid_yaw_.calculate(velocity_target_.angular.z, feedback_yaw);
+    cmd = target;
+    cmd.linear.x += velocity_pid_x_.calculate(target.linear.x, feedback_right);
+    cmd.linear.y += velocity_pid_y_.calculate(target.linear.y, feedback_forward);
+    cmd.angular.z += velocity_pid_yaw_.calculate(target.angular.z, feedback_yaw);
     clampCommand(cmd);
     RCLCPP_INFO_THROTTLE(
       get_logger(), *get_clock(), 500,
-      "速度闭环: target(right=%.2f forward=%.2f yaw=%.2f) feedback(right=%.2f forward=%.2f yaw=%.2f) cmd(right=%.2f forward=%.2f yaw=%.2f)",
-      velocity_target_.linear.x, velocity_target_.linear.y, velocity_target_.angular.z,
+      "速度闭环: target(right=%.2f forward=%.2f yaw=%.2f) feedback(right=%.2f forward=%.2f yaw=%.2f) yaw_hold(err=%.3f ref=%.3f now=%.3f) cmd(right=%.2f forward=%.2f yaw=%.2f)",
+      target.linear.x, target.linear.y, target.angular.z,
       feedback_right, feedback_forward, feedback_yaw,
+      last_yaw_hold_error_, yaw_hold_reference_, latest_yaw_,
       cmd.linear.x, cmd.linear.y, cmd.angular.z);
     return cmd;
   }
@@ -381,10 +437,10 @@ private:
     cmd.angular.z = std::clamp(cmd.angular.z, -max_angular_velocity_, max_angular_velocity_);
   }
 
-  bool isZeroVelocityTarget() const {
-    return std::abs(velocity_target_.linear.x) <= zero_target_deadband_ &&
-      std::abs(velocity_target_.linear.y) <= zero_target_deadband_ &&
-      std::abs(velocity_target_.angular.z) <= zero_target_deadband_;
+  bool isZeroVelocityTarget(const geometry_msgs::msg::Twist& target) const {
+    return std::abs(target.linear.x) <= zero_target_deadband_ &&
+      std::abs(target.linear.y) <= zero_target_deadband_ &&
+      std::abs(target.angular.z) <= zero_target_deadband_;
   }
 
   void controlLoop() {
@@ -477,6 +533,11 @@ private:
   double cmd_timeout_ {0.5};
   double zero_target_deadband_ {1e-3};
   double yaw_feedback_sign_ {-1.0};
+  bool yaw_hold_enabled_ {false};
+  double yaw_hold_kp_ {1.2};
+  double yaw_hold_max_angular_velocity_ {0.6};
+  double yaw_hold_deadband_ {0.03};
+  double yaw_hold_release_angular_velocity_ {0.05};
   double position_timeout_ {1.0};
   double goal_tolerance_xy_ {0.02};
   double goal_tolerance_yaw_ {0.05};
@@ -488,8 +549,11 @@ private:
   geometry_msgs::msg::Pose2D pose_target_;
   bool has_pose_target_ {false};
   bool has_odom_ {false};
+  bool has_yaw_hold_reference_ {false};
   nav_msgs::msg::Odometry latest_odom_;
   double latest_yaw_ {0.0};
+  double yaw_hold_reference_ {0.0};
+  double last_yaw_hold_error_ {0.0};
   rclcpp::Time last_cmd_time_;
   rclcpp::Time last_pose_cmd_time_;
   rclcpp::Time last_odom_time_;
