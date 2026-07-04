@@ -19,7 +19,8 @@ import subprocess
 import time
 import math
 
-CONFIG_PATH = '/home/rosemaryrabbit/USB2CAN_motor/src/motor_control_ros2/config/motors.yaml'
+CONFIG_PATH = '/home/rosemaryrabbit/USB2CAN_motor/install/motor_control_ros2/share/motor_control_ros2/config/motors.yaml'
+CONFIG_SRC  = '/home/rosemaryrabbit/USB2CAN_motor/src/motor_control_ros2/config/motors.yaml'
 WORKSPACE = '/home/rosemaryrabbit/USB2CAN_motor'
 
 MOTOR_NAMES = ['strike_motor_L1', 'strike_motor_L2',
@@ -150,6 +151,11 @@ def main():
 
     print("-" * 60)
     print("✓ 配置已更新")
+
+    # 同步回源码目录（防止 colcon build 覆盖）
+    import shutil
+    shutil.copy2(CONFIG_PATH, CONFIG_SRC)
+    print("✓ 已同步到源码目录")
 
     # 4. 重启节点
     proc = restart_motor_control_node()
