@@ -175,6 +175,27 @@ private:
       return;
     }
 
+    auto loadPid = [](const YAML::Node& node, PIDParams& pid) {
+      if (node["kp"]) {
+        pid.kp = node["kp"].as<double>();
+      }
+      if (node["ki"]) {
+        pid.ki = node["ki"].as<double>();
+      }
+      if (node["kd"]) {
+        pid.kd = node["kd"].as<double>();
+      }
+      if (node["i_max"]) {
+        pid.i_max = node["i_max"].as<double>();
+      }
+      if (node["out_max"]) {
+        pid.out_max = node["out_max"].as<double>();
+      }
+      if (node["dead_zone"]) {
+        pid.dead_zone = node["dead_zone"].as<double>();
+      }
+    };
+
     std::map<std::string, std::pair<PIDParams, PIDParams>> type_params;
     for (const auto& type_node : config["dji_motors"]) {
       const std::string motor_type = type_node.first.as<std::string>();
@@ -182,22 +203,10 @@ private:
       PIDParams vel_pid;
 
       if (type_node.second["position_pid"]) {
-        const auto pos = type_node.second["position_pid"];
-        pos_pid.kp = pos["kp"].as<double>();
-        pos_pid.ki = pos["ki"].as<double>();
-        pos_pid.kd = pos["kd"].as<double>();
-        pos_pid.i_max = pos["i_max"].as<double>();
-        pos_pid.out_max = pos["out_max"].as<double>();
-        pos_pid.dead_zone = pos["dead_zone"].as<double>();
+        loadPid(type_node.second["position_pid"], pos_pid);
       }
       if (type_node.second["velocity_pid"]) {
-        const auto vel = type_node.second["velocity_pid"];
-        vel_pid.kp = vel["kp"].as<double>();
-        vel_pid.ki = vel["ki"].as<double>();
-        vel_pid.kd = vel["kd"].as<double>();
-        vel_pid.i_max = vel["i_max"].as<double>();
-        vel_pid.out_max = vel["out_max"].as<double>();
-        vel_pid.dead_zone = vel["dead_zone"].as<double>();
+        loadPid(type_node.second["velocity_pid"], vel_pid);
       }
       type_params[motor_type] = {pos_pid, vel_pid};
     }
@@ -210,6 +219,35 @@ private:
         motor->setPositionPID(it->second.first);
         motor->setVelocityPID(it->second.second);
       }
+    }
+
+    if (!config["motor_overrides"]) {
+      return;
+    }
+    for (const auto& motor_node : config["motor_overrides"]) {
+      const std::string motor_name = motor_node.first.as<std::string>();
+      const auto motor_it = motors_.find(motor_name);
+      if (motor_it == motors_.end()) {
+        RCLCPP_WARN(this->get_logger(), "忽略未知电机 PID 覆盖: %s", motor_name.c_str());
+        continue;
+      }
+      auto dji = std::dynamic_pointer_cast<DJIMotor>(motor_it->second);
+      if (!dji) {
+        continue;
+      }
+
+      const std::string key =
+        dji->getMotorType() == MotorType::DJI_GM6020 ? "GM6020" : "GM3508";
+      auto params = type_params[key];
+      if (motor_node.second["position_pid"]) {
+        loadPid(motor_node.second["position_pid"], params.first);
+        dji->setPositionPID(params.first);
+      }
+      if (motor_node.second["velocity_pid"]) {
+        loadPid(motor_node.second["velocity_pid"], params.second);
+        dji->setVelocityPID(params.second);
+      }
+      RCLCPP_INFO(this->get_logger(), "应用电机 PID 覆盖: %s", motor_name.c_str());
     }
   }
 

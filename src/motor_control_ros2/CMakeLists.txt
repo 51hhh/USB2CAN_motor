@@ -77,11 +77,21 @@ ament_target_dependencies(rc_usb_control_node
   std_msgs
 )
 
+add_executable(vision_goal_tracker_node
+  src/nodes/vision_goal_tracker_node.cpp
+)
+ament_target_dependencies(vision_goal_tracker_node
+  geometry_msgs
+  nav_msgs
+  rclcpp
+)
+
 install(TARGETS
   motor_control_lib
   motor_control_node
   omni_chassis_control_node
   rc_usb_control_node
+  vision_goal_tracker_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}

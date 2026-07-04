@@ -26,8 +26,8 @@ rc_usb_control_node:
     # lx -> linear.x, ly -> linear.y, rx -> angular.z
     axis_max: 660.0
     deadzone: 0.05
-    max_linear_velocity: 0.5
-    max_angular_velocity: 1.0
+    max_linear_velocity: 1.5
+    max_angular_velocity: 2.0
     invert_linear_x: false
     invert_linear_y: false
     invert_angular_z: false

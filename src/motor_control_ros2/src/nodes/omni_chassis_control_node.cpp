@@ -143,8 +143,10 @@ private:
     loadDouble("install_angle", install_angle_);
     loadDouble("max_linear_velocity", max_linear_velocity_);
     loadDouble("max_angular_velocity", max_angular_velocity_);
+    loadDouble("max_wheel_linear_velocity", max_wheel_linear_velocity_);
     loadDouble("cmd_timeout", cmd_timeout_);
     loadDouble("zero_target_deadband", zero_target_deadband_);
+    loadDouble("yaw_feedback_sign", yaw_feedback_sign_);
     loadDouble("position_timeout", position_timeout_);
     loadDouble("goal_tolerance_xy", goal_tolerance_xy_);
     loadDouble("goal_tolerance_yaw", goal_tolerance_yaw_);
@@ -313,10 +315,20 @@ private:
     }
 
     const auto& twist = latest_odom_.twist.twist;
-    cmd.linear.x = velocity_pid_x_.calculate(velocity_target_.linear.x, twist.linear.x);
-    cmd.linear.y = velocity_pid_y_.calculate(velocity_target_.linear.y, twist.linear.y);
-    cmd.angular.z = velocity_pid_yaw_.calculate(velocity_target_.angular.z, twist.angular.z);
+    const double feedback_right = -twist.linear.y;
+    const double feedback_forward = twist.linear.x;
+    const double feedback_yaw = yaw_feedback_sign_ * twist.angular.z;
+    cmd = velocity_target_;
+    cmd.linear.x += velocity_pid_x_.calculate(velocity_target_.linear.x, feedback_right);
+    cmd.linear.y += velocity_pid_y_.calculate(velocity_target_.linear.y, feedback_forward);
+    cmd.angular.z += velocity_pid_yaw_.calculate(velocity_target_.angular.z, feedback_yaw);
     clampCommand(cmd);
+    RCLCPP_INFO_THROTTLE(
+      get_logger(), *get_clock(), 500,
+      "速度闭环: target(right=%.2f forward=%.2f yaw=%.2f) feedback(right=%.2f forward=%.2f yaw=%.2f) cmd(right=%.2f forward=%.2f yaw=%.2f)",
+      velocity_target_.linear.x, velocity_target_.linear.y, velocity_target_.angular.z,
+      feedback_right, feedback_forward, feedback_yaw,
+      cmd.linear.x, cmd.linear.y, cmd.angular.z);
     return cmd;
   }
 
@@ -389,9 +401,33 @@ private:
       chassis_cmd = computeVelocityModeCommand();
     }
 
-    const auto wheel_velocities = kinematics_->inverseKinematics(
+    auto wheel_velocities = kinematics_->inverseKinematics(
       chassis_cmd.linear.x, chassis_cmd.linear.y, chassis_cmd.angular.z);
+    scaleWheelVelocities(wheel_velocities);
     publishMotorCommands(wheel_velocities, this->now());
+  }
+
+  void scaleWheelVelocities(std::array<double, 4>& wheel_velocities) {
+    if (max_wheel_linear_velocity_ <= 0.0) {
+      return;
+    }
+
+    double max_abs = 0.0;
+    for (const double velocity : wheel_velocities) {
+      max_abs = std::max(max_abs, std::abs(velocity));
+    }
+    if (max_abs <= max_wheel_linear_velocity_) {
+      return;
+    }
+
+    const double scale = max_wheel_linear_velocity_ / max_abs;
+    for (double& velocity : wheel_velocities) {
+      velocity *= scale;
+    }
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), 1000,
+      "轮速统一缩放: max=%.2f limit=%.2f scale=%.2f",
+      max_abs, max_wheel_linear_velocity_, scale);
   }
 
   void publishMotorCommands(
@@ -437,8 +473,10 @@ private:
   double install_angle_ {45.0};
   double max_linear_velocity_ {2.0};
   double max_angular_velocity_ {2.0};
+  double max_wheel_linear_velocity_ {3.0};
   double cmd_timeout_ {0.5};
   double zero_target_deadband_ {1e-3};
+  double yaw_feedback_sign_ {-1.0};
   double position_timeout_ {1.0};
   double goal_tolerance_xy_ {0.02};
   double goal_tolerance_yaw_ {0.05};
