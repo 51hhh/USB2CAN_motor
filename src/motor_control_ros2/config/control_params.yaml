@@ -1,4 +1,5 @@
 motor_control_node:
   ros__parameters:
     control_frequency: 200.0     # Hz - 控制循环和状态发布频率
+    command_timeout: 0.5         # s - 超时后电机输出清零
     config_file: "config/motors.yaml"

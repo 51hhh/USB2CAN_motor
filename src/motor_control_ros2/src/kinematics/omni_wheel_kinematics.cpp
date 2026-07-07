@@ -33,13 +33,13 @@ std::array<double, 4> OmniWheelKinematics::inverseKinematics(
     //       |                |
     //       |    车辆        |
     //       |                |
-    //     RL(-135°) ---- RR(135°)
+    //     RL(135°) ---- RR(-135°)
     //
     // 安装角度（轮子能转动的方向）：
     // FL: 45° (向右上方)
     // FR: -45° (向左上方)  
-    // RL: -135° (向左下方)
-    // RR: 135° (向右下方)
+    // RL: 135° (向左下方)
+    // RR: -135° (向右下方)
     
     double angular_component = wz * chassis_radius_;
     
@@ -51,12 +51,12 @@ std::array<double, 4> OmniWheelKinematics::inverseKinematics(
     double angle_fr = -install_angle_rad_;  // -45°
     wheel_velocities[1] = vx * std::cos(angle_fr) + vy * std::sin(angle_fr) + angular_component;
     
-    // 左后轮 (RL): 安装角 -135° (= 180° - 45°)
-    double angle_rl = M_PI - install_angle_rad_;  // -135°
+    // 左后轮 (RL): 安装角 135° (= 180° - 45°)
+    double angle_rl = M_PI - install_angle_rad_;  // 135°
     wheel_velocities[2] = vx * std::cos(angle_rl) + vy * std::sin(angle_rl) + angular_component;
     
-    // 右后轮 (RR): 安装角 135° (= 180° + 45°)
-    double angle_rr = M_PI + install_angle_rad_;  // 135°
+    // 右后轮 (RR): 安装角 -135° (= 180° + 45°)
+    double angle_rr = M_PI + install_angle_rad_;  // -135°
     wheel_velocities[3] = vx * std::cos(angle_rr) + vy * std::sin(angle_rr) + angular_component;
     
     return wheel_velocities;
@@ -68,8 +68,8 @@ void OmniWheelKinematics::forwardKinematics(
 {
     // X 形布置全向轮正运动学公式（从轮子速度推算底盘速度）
     // 使用雅可比矩阵逆：
-    // [vx]   [cos(45°)   cos(-45°)  cos(-135°)  cos(135°) ]^-1   [v1]
-    // [vy] = [sin(45°)   sin(-45°)  sin(-135°)  sin(135°) ]   * [v2]
+    // [vx]   [cos(45°)   cos(-45°)  cos(135°)  cos(-135°) ]^-1   [v1]
+    // [vy] = [sin(45°)   sin(-45°)  sin(135°)  sin(-135°) ]   * [v2]
     // [wz]   [1/L         1/L         1/L         1/L      ]      [v3]
     //                                                               [v4]
     
@@ -80,8 +80,8 @@ void OmniWheelKinematics::forwardKinematics(
     
     double angle_fl = install_angle_rad_;      // 45°
     double angle_fr = -install_angle_rad_;     // -45°
-    double angle_rl = M_PI - install_angle_rad_;  // -135°
-    double angle_rr = M_PI + install_angle_rad_;  // 135°
+    double angle_rl = M_PI - install_angle_rad_;  // 135°
+    double angle_rr = M_PI + install_angle_rad_;  // -135°
     
     // 雅可比矩阵的逆（通过求解最小二乘问题）
     // 对于对称的X型4轮配置，可以解析求解：

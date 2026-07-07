@@ -41,6 +41,8 @@ DJIMotor::DJIMotor(const std::string& joint_name, MotorType type,
 }
 
 void DJIMotor::updateFeedback(const std::string& interface_name, uint32_t can_id, const uint8_t* data, size_t len) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+
   // 检查接口名称匹配（多路 CAN 支持）
   if (!interface_name_.empty() && interface_name != interface_name_) {
     return;  // 不是该电机所属的接口
@@ -110,6 +112,8 @@ void DJIMotor::disable() {
 }
 
 void DJIMotor::setOutput(int16_t value) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+
   // 限幅
   if (value > max_output_) value = max_output_;
   if (value < -max_output_) value = -max_output_;
@@ -117,6 +121,8 @@ void DJIMotor::setOutput(int16_t value) {
 }
 
 void DJIMotor::getControlBytes(uint8_t bytes[2]) const {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+
   // Big Endian
   bytes[0] = (target_output_ >> 8) & 0xFF;
   bytes[1] = target_output_ & 0xFF;
@@ -125,30 +131,38 @@ void DJIMotor::getControlBytes(uint8_t bytes[2]) const {
 // ========== 串级控制实现 ==========
 
 void DJIMotor::setControlMode(ControlMode mode) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   cascade_controller_.setMode(mode);
 }
 
 ControlMode DJIMotor::getControlMode() const {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   return cascade_controller_.getMode();
 }
 
 void DJIMotor::setPositionTarget(double position) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   position_target_ = position;
 }
 
 void DJIMotor::setVelocityTarget(double velocity) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   velocity_target_ = velocity;
 }
 
 void DJIMotor::setPositionPID(const PIDParams& params) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   cascade_controller_.setPositionPID(params);
 }
 
 void DJIMotor::setVelocityPID(const PIDParams& params) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   cascade_controller_.setVelocityPID(params);
 }
 
 void DJIMotor::updateController() {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+
   // 使用度和 RPM 作为单位，与 Python 实现一致
   double output = cascade_controller_.update(
     position_target_,                    // 位置目标 (度)

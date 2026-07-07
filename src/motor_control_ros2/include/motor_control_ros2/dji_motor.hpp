@@ -5,6 +5,7 @@
 #include "motor_control_ros2/cascade_controller.hpp"
 #include <cstdint>
 #include <cmath>
+#include <mutex>
 
 namespace motor_control {
 
@@ -121,22 +122,34 @@ public:
   /**
    * @brief 设置零位偏移（输出轴弧度）
    */
-  void setOffset(double offset_rad) { offset_rad_ = offset_rad; }
+  void setOffset(double offset_rad) {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+    offset_rad_ = offset_rad;
+  }
 
   /**
    * @brief 获取零位偏移（输出轴弧度）
    */
-  double getOffset() const { return offset_rad_; }
+  double getOffset() const {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+    return offset_rad_;
+  }
 
   /**
    * @brief 设置方向（1 或 -1）
    */
-  void setDirection(int dir) { direction_ = (dir >= 0) ? 1 : -1; }
+  void setDirection(int dir) {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+    direction_ = (dir >= 0) ? 1 : -1;
+  }
 
   /**
    * @brief 获取方向
    */
-  int getDirection() const { return direction_; }
+  int getDirection() const {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+    return direction_;
+  }
 
   /**
    * @brief 获取角度（度，0-360）
@@ -147,6 +160,7 @@ public:
    * 减去 offset 后归一化
    */
   double getAngleDegrees() const {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
     // 获取输出轴位置（弧度），应用方向和零位偏移
     double output_rad = getOutputPosition() * direction_ - offset_rad_;
     
@@ -165,6 +179,7 @@ public:
    * 与 Python 实现一致的单位
    */
   int16_t getRPM() const {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
     return raw_rpm_;
   }
 
@@ -172,6 +187,7 @@ public:
    * @brief 获取实际电流（raw 值）
    */
   int16_t getCurrent() const {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
     return raw_current_;
   }
 

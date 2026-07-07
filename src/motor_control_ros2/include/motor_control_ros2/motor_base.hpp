@@ -2,9 +2,8 @@
 #define MOTOR_CONTROL_ROS2__MOTOR_BASE_HPP_
 
 #include <string>
-#include <memory>
 #include <cmath>
-#include <atomic>
+#include <mutex>
 
 namespace motor_control {
 
@@ -13,11 +12,7 @@ namespace motor_control {
  */
 enum class MotorType {
   DJI_GM3508,
-  DJI_GM6020,
-  DAMIAO_DM4310,
-  DAMIAO_DM4340,
-  UNITREE_A1,
-  UNITREE_GO8010
+  DJI_GM6020
 };
 
 /**
@@ -97,7 +92,10 @@ public:
   /**
    * @brief 获取在线状态
    */
-  bool isOnline() const { return online_; }
+  bool isOnline() const {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+    return online_;
+  }
   
   /**
    * @brief 检查心跳超时并更新在线状态
@@ -105,6 +103,7 @@ public:
    * @param current_time_ns 当前时间（纳秒）
    */
   void checkHeartbeat(double timeout_ms, int64_t current_time_ns) {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
     if (last_feedback_time_ns_ == 0) {
       // 从未收到反馈
       online_ = false;
@@ -121,6 +120,7 @@ public:
    * @brief 更新最后反馈时间（在 updateFeedback 中调用）
    */
   void updateLastFeedbackTime(int64_t current_time_ns) {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
     last_feedback_time_ns_ = current_time_ns;
     online_ = true;
   }
@@ -129,6 +129,7 @@ public:
    * @brief 设置接口名称
    */
   void setInterfaceName(const std::string& name) {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
     interface_name_ = name;
   }
 
@@ -136,23 +137,10 @@ public:
    * @brief 获取接口名称
    */
   std::string getInterfaceName() const {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
     return interface_name_;
   }
 
-  /**
-   * @brief 设置设备路径（如 /dev/ttyUSB0）
-   */
-  void setDevicePath(const std::string& path) {
-    device_path_ = path;
-  }
-
-  /**
-   * @brief 获取设备路径
-   */
-  std::string getDevicePath() const {
-    return device_path_;
-  }
-  
   /**
    * @brief 获取输出轴位置（弧度）
    * 
@@ -160,6 +148,7 @@ public:
    * 如果编码器在电机侧，除以减速比转换。
    */
   double getOutputPosition() const {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
     if (encoder_on_output_) {
       return position_;
     } else {
@@ -171,6 +160,7 @@ public:
    * @brief 获取输出轴速度（弧度/秒）
    */
   double getOutputVelocity() const {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
     if (encoder_on_output_) {
       return velocity_;
     } else {
@@ -182,6 +172,7 @@ public:
    * @brief 获取输出轴力矩（Nm）
    */
   double getOutputTorque() const {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
     if (encoder_on_output_) {
       return torque_;
     } else {
@@ -192,7 +183,10 @@ public:
   /**
    * @brief 获取温度
    */
-  float getTemperature() const { return temperature_; }
+  float getTemperature() const {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+    return temperature_;
+  }
   
   /**
    * @brief 设置输出轴目标位置（弧度）
@@ -201,6 +195,7 @@ public:
    * 如果编码器在电机侧，乘以减速比转换。
    */
   void setOutputPosition(double output_pos) {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
     if (encoder_on_output_) {
       target_position_ = output_pos;
     } else {
@@ -212,6 +207,7 @@ public:
    * @brief 设置输出轴目标速度（弧度/秒）
    */
   void setOutputVelocity(double output_vel) {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
     if (encoder_on_output_) {
       target_velocity_ = output_vel;
     } else {
@@ -223,6 +219,7 @@ public:
    * @brief 设置输出轴目标力矩（Nm）
    */
   void setOutputTorque(double output_torque) {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
     if (encoder_on_output_) {
       target_torque_ = output_torque;
     } else {
@@ -231,6 +228,8 @@ public:
   }
 
 protected:
+  mutable std::recursive_mutex state_mutex_;
+
   // 基本信息
   std::string joint_name_;
   MotorType motor_type_;
@@ -254,7 +253,6 @@ protected:
   
   // 接口信息
   std::string interface_name_;  // 所属的 CAN/串口接口名称
-  std::string device_path_;     // 实际设备路径（如 /dev/ttyUSB0）
 };
 
 } // namespace motor_control

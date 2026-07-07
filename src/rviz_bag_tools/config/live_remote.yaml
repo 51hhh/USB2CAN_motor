@@ -1,0 +1,28 @@
+# RViz-only live viewing configuration.
+# This script does not publish any ROS topic. It only sets DDS-related
+# environment variables and starts RViz.
+
+live:
+  rviz_config: "rviz/live_chassis.rviz"
+  env:
+    RMW_IMPLEMENTATION: "rmw_cyclonedds_cpp"
+    ROS_DOMAIN_ID: "0"
+    # Set this when using a dedicated CycloneDDS config:
+    # CYCLONEDDS_URI: "file:///home/rick/mid360/config/cyclonedds_pc.xml"
+
+  # Optional safety adapter for bridged/remote odometry.
+  # Enable this when the remote topic is bridged into a prefixed topic and you
+  # want RViz to use local, non-conflicting frames.
+  # When enabled, set rviz_config to "rviz/live_remote_view.rviz".
+  adapter:
+    enabled: false
+    input_odom: "/odom"
+    output_odom: "/remote_view/odom"
+    path_topic: "/remote_view/path"
+    frame_id: "remote_odom"
+    child_frame_id: "remote_base_link"
+    max_path_poses: 5000
+    stamp_policy: "preserve"
+    publish_tf: true
+    qos_reliability: "reliable"   # reliable | best_effort
+    qos_depth: 50
