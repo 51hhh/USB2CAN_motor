@@ -25,21 +25,21 @@ vision_goal_tracker_node:
     auto_goal_hold_time: 6.0
     pre_goal_hold_time: 2.0
     goal_tolerance: 0.10
-    stop_forward_distance: 0.70
+    stop_forward_distance: 0.95
 
     # 视觉坐标默认约定: x=前方, y=左侧。
     # 底盘速度约定: linear.y=前进, linear.x=右移。
     kp_forward: 3.6
-    kp_lateral: 2.0
-    max_forward_velocity: 4.5
-    max_lateral_velocity: 1.3
+    kp_lateral: 1.6
+    max_forward_velocity: 7.0
+    max_lateral_velocity: 2.1
     max_far_lateral_velocity: 1.0
     far_lateral_distance: 2.5
-    max_backward_velocity: 0.7
+    max_backward_velocity: 1.0
     max_linear_accel: 16.0
-    approach_slow_distance: 1.2
-    max_near_forward_velocity: 1.1
-    reverse_deadband: 0.35
+    approach_slow_distance: 0.5
+    max_near_forward_velocity: 2.0
+    reverse_deadband: 0.2
     forward_sign: 1.0
     lateral_sign: -1.0
     use_odom_yaw: false
