@@ -59,7 +59,7 @@ can_interfaces:
 
 
 serial_interfaces:
-- device: /dev/ttyUSB0
+- device: /dev/ttyUSB2
   baudrate: 4000000
   protocol: native
   motors:
@@ -67,7 +67,7 @@ serial_interfaces:
     type: GO8010
     id: 0
     direction: -1
-    offset: -1.369072
+    offset: -1.347383
     gear_ratio: 6.33
     k_pos: 0.01
     k_spd: 0.005
@@ -75,11 +75,11 @@ serial_interfaces:
     type: GO8010
     id: 1
     direction: 1
-    offset: -0.288742
+    offset: -0.395582
     gear_ratio: 6.33
     k_pos: 0.01
     k_spd: 0.005
-- device: /dev/ttyUSB1
+- device: /dev/ttyUSB3
   baudrate: 4000000
   protocol: native
   motors:
@@ -87,7 +87,7 @@ serial_interfaces:
     type: GO8010
     id: 2
     direction: 1
-    offset: -0.222827
+    offset: -0.217435
     gear_ratio: 6.33
     k_pos: 0.01
     k_spd: 0.005
@@ -95,7 +95,7 @@ serial_interfaces:
     type: GO8010
     id: 3
     direction: -1
-    offset: -0.873921
+    offset: -1.005085
     gear_ratio: 6.33
     k_pos: 0.01
     k_spd: 0.005

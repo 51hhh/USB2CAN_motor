@@ -1,4 +1,7 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
+# ⚠️ 必须用系统 Python 3.10（ROS2 Humble 依赖），不能用 conda 的 Python 3.13
+# 用法: /usr/bin/python3 calibrate_zero_position.py
+#      或先 source install/setup.bash 再运行
 """
 宇树电机零点校准工具
 将当前位置设置为0度基准点

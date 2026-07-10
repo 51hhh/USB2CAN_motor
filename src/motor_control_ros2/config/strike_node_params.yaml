@@ -49,13 +49,13 @@ strike_node:
     # 电机设备配置
     motors:
       l1_id: 0
-      l1_device: "/dev/ttyUSB0"  # 左大臂
+      l1_device: "/dev/ttyUSB2"  # 左大臂
       l2_id: 1
-      l2_device: "/dev/ttyUSB0"  # 左小臂
+      l2_device: "/dev/ttyUSB2"  # 左小臂
       r1_id: 2
-      r1_device: "/dev/ttyUSB1"  # 右大臂
+      r1_device: "/dev/ttyUSB3"  # 右大臂
       r2_id: 3
-      r2_device: "/dev/ttyUSB1"  # 右小臂
+      r2_device: "/dev/ttyUSB3"  # 右小臂
 
     # ================================================================
     # 击球方案列表
@@ -86,14 +86,14 @@ strike_node:
         strike:
           main:                  # kp=0 纯速度模式
             pos_deg: 0.0
-            vel: 5.0            # 目标速度 (rad/s)
-            torque_ff: 1.5       # 额外加速前馈 (Nm)
+            vel: 6.0            # 目标速度 (rad/s)  ← 6.0→4.0
+            torque_ff: 3.5       # 额外加速前馈 (Nm) ← 3.5→1.5
             kp: 0.0
             kd: 0.1
           sub:
             pos_deg: 0.0
             vel: 5.0
-            torque_ff: 1.5
+            torque_ff: 1.5       # ← 3.5→1.5
             kp: 0.0
             kd: 0.1
 
