@@ -13,6 +13,7 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/u_int8.hpp>
 
 namespace motor_control {
 
@@ -78,6 +79,8 @@ private:
   std::string cmd_vel_topic_{"/cmd_vel"};
   std::string estop_topic_{"/chassis/estop"};
   std::string vision_cmd_vel_topic_{"/vision/cmd_vel"};
+  std::string strike_switch_topic_{"/rc/strike_switch"};
+  std::string strike_switch_field_{"right"};
   std::string mode_switch_field_{"left"};
   int baud_rate_{115200};
   int serial_read_chunk_{256};
@@ -101,9 +104,11 @@ private:
   bool invert_angular_z_{false};
   bool publish_zero_before_first_frame_{true};
   bool enable_vision_passthrough_{true};
+  bool enable_strike_switch_output_{true};
 
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr estop_pub_;
+  rclcpp::Publisher<std_msgs::msg::UInt8>::SharedPtr strike_switch_pub_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr vision_cmd_sub_;
   rclcpp::TimerBase::SharedPtr publish_timer_;
 

@@ -30,6 +30,9 @@ RCUsbControlNode::RCUsbControlNode()
 
   cmd_vel_pub_ = create_publisher<geometry_msgs::msg::Twist>(cmd_vel_topic_, 10);
   estop_pub_ = create_publisher<std_msgs::msg::Bool>(estop_topic_, 10);
+  if (enable_strike_switch_output_) {
+    strike_switch_pub_ = create_publisher<std_msgs::msg::UInt8>(strike_switch_topic_, 10);
+  }
   if (enable_vision_passthrough_) {
     vision_cmd_sub_ = create_subscription<geometry_msgs::msg::Twist>(
       vision_cmd_vel_topic_, 10,
@@ -59,6 +62,10 @@ RCUsbControlNode::RCUsbControlNode()
     get_logger(),
     "遥控映射: lx->linear.x(右/左) ly->linear.y(前/后) rx->angular.z, 视觉输入=%s",
     enable_vision_passthrough_ ? vision_cmd_vel_topic_.c_str() : "disabled");
+  RCLCPP_INFO(
+    get_logger(), "击球拨杆状态输出: %s field=%s (UP=1 MID=3 DOWN=2, 断线=0)",
+    enable_strike_switch_output_ ? strike_switch_topic_.c_str() : "disabled",
+    strike_switch_field_.c_str());
 }
 
 RCUsbControlNode::~RCUsbControlNode()
@@ -75,6 +82,8 @@ void RCUsbControlNode::configureParameters()
   declare_parameter("cmd_vel_topic", cmd_vel_topic_);
   declare_parameter("estop_topic", estop_topic_);
   declare_parameter("vision_cmd_vel_topic", vision_cmd_vel_topic_);
+  declare_parameter("strike_switch_topic", strike_switch_topic_);
+  declare_parameter("strike_switch_field", strike_switch_field_);
   declare_parameter("mode_switch_field", mode_switch_field_);
 
   declare_parameter("max_linear_velocity", max_linear_velocity_);
@@ -97,6 +106,7 @@ void RCUsbControlNode::configureParameters()
   declare_parameter("invert_angular_z", invert_angular_z_);
   declare_parameter("publish_zero_before_first_frame", publish_zero_before_first_frame_);
   declare_parameter("enable_vision_passthrough", enable_vision_passthrough_);
+  declare_parameter("enable_strike_switch_output", enable_strike_switch_output_);
 
   declare_parameter("serial_read_chunk", serial_read_chunk_);
   declare_parameter("serial_reconnect_interval_ms", serial_reconnect_interval_ms_);
@@ -120,6 +130,8 @@ void RCUsbControlNode::configureParameters()
   get_parameter("cmd_vel_topic", cmd_vel_topic_);
   get_parameter("estop_topic", estop_topic_);
   get_parameter("vision_cmd_vel_topic", vision_cmd_vel_topic_);
+  get_parameter("strike_switch_topic", strike_switch_topic_);
+  get_parameter("strike_switch_field", strike_switch_field_);
   get_parameter("mode_switch_field", mode_switch_field_);
 
   get_parameter("max_linear_velocity", max_linear_velocity_);
@@ -154,6 +166,7 @@ void RCUsbControlNode::configureParameters()
   get_parameter("invert_angular_z", invert_angular_z_);
   get_parameter("publish_zero_before_first_frame", publish_zero_before_first_frame_);
   get_parameter("enable_vision_passthrough", enable_vision_passthrough_);
+  get_parameter("enable_strike_switch_output", enable_strike_switch_output_);
 
   get_parameter("serial_read_chunk", serial_read_chunk_);
   get_parameter("serial_reconnect_interval_ms", serial_reconnect_interval_ms_);
@@ -178,6 +191,9 @@ void RCUsbControlNode::configureParameters()
   vision_switch_ = sanitizeSwitch(vision_switch_, kSwitchDown);
   if (mode_switch_field_ != "left" && mode_switch_field_ != "right") {
     mode_switch_field_ = "left";
+  }
+  if (strike_switch_field_ != "left" && strike_switch_field_ != "right") {
+    strike_switch_field_ = "right";
   }
 }
 
@@ -460,12 +476,16 @@ void RCUsbControlNode::publishCommand()
   bool timed_out = false;
   bool vision_stale = false;
   bool estop_active = true;
+  uint8_t strike_switch = 0;
 
   const auto now_time = now();
   {
     std::lock_guard<std::mutex> lock(command_mutex_);
     const bool have_fresh_frame =
       has_valid_frame_ && ((now_time - last_frame_time_).seconds() <= command_timeout_);
+    if (have_fresh_frame) {
+      strike_switch = strike_switch_field_ == "right" ? last_sw_right_ : last_sw_left_;
+    }
 
     if (!has_valid_frame_) {
       cmd = zeroTwist();
@@ -506,6 +526,12 @@ void RCUsbControlNode::publishCommand()
   auto estop_msg = std_msgs::msg::Bool();
   estop_msg.data = estop_active;
   estop_pub_->publish(estop_msg);
+
+  if (strike_switch_pub_) {
+    auto switch_msg = std_msgs::msg::UInt8();
+    switch_msg.data = strike_switch;
+    strike_switch_pub_->publish(switch_msg);
+  }
 
   if (should_publish) {
     cmd_vel_pub_->publish(cmd);

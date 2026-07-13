@@ -10,6 +10,9 @@ rc_usb_control_node:
     estop_topic: "/chassis/estop"
     vision_cmd_vel_topic: "/vision/cmd_vel"
     enable_vision_passthrough: true
+    strike_switch_topic: "/rc/strike_switch"
+    strike_switch_field: "right" # 上机看 RC 诊断确认；若固件字段相反可改为 "left"
+    enable_strike_switch_output: true
 
     # 遥控器帧字段来自 rc_forward.h:
     # lx: 左摇杆左右，右推为正
@@ -48,6 +51,9 @@ rc_usb_control_node:
     manual_switch: 1
     estop_switch: 3
     vision_switch: 2
+
+    # 右拨杆状态独立发布给击球臂：UP=1 MID=3 DOWN=2；RC 超时发布 0。
+    # 击球边沿和上电互锁由 strike_node 处理，不影响左拨杆底盘模式。
 
     serial_reconnect_interval_ms: 1000
     serial_read_chunk: 256

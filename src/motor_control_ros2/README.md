@@ -56,7 +56,9 @@
 | `rx` | 右摇杆左右，右推为正 | `/cmd_vel.angular.z`，旋转 |
 | `ry` | 右摇杆前后 | 当前未使用 |
 | `sw_left` | 左三档拨杆，`UP=1 MID=3 DOWN=2` | 手动 / 硬急停 / 视觉模式切换 |
-| `sw_right` | 右三档拨杆，`UP=1 MID=3 DOWN=2` | 当前未使用 |
+| `sw_right` | 右三档拨杆，`UP=1 MID=3 DOWN=2` | 发布 `/rc/strike_switch`，供击球臂做蓄力/边沿触发 |
+
+击球拨杆话题持续发布当前右拨杆值；遥控首帧未到或帧超时时发布 `0`。机械臂侧以中档解锁，只有 `中→上` 和 `中→下` 边沿分别触发 `center` 和 `strong`，返回中档不触发。
 
 USB2CAN、遥控 CDC、MCU 里程计串口不应共用同一设备。当前设备绑定为：USB2CAN 使用 `/dev/robocon_usb2can` (`2e88:4603`)，遥控器 STM32 CDC 使用 `/dev/robocon_rc` (`0483:5740`)，码盘串口使用 `/dev/robocon_odom` (`1a86:7522`)。拨杆值按 DJI DBUS 宏定义处理：`UP=1`、`MID=3`、`DOWN=2`。当前使用物理左拨杆，对应帧内 `sw_left`，因此默认 `mode_switch_field: "left"`。
 
