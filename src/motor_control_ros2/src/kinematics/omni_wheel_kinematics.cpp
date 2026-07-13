@@ -8,8 +8,8 @@ OmniWheelKinematics::OmniWheelKinematics(
     double wheel_base_y, 
     double wheel_radius,
     double install_angle)
-    : wheel_base_x_(wheel_base_x / 2.0)  // 转换为半轮距
-    , wheel_base_y_(wheel_base_y / 2.0)  // 转换为半轴距
+    : wheel_base_x_(wheel_base_x / 2.0)  // 转换为 X 方向半轮距
+    , wheel_base_y_(wheel_base_y / 2.0)  // 转换为 Y 方向半轮距
     , wheel_radius_(wheel_radius)
     , install_angle_rad_(install_angle * M_PI / 180.0)
 {

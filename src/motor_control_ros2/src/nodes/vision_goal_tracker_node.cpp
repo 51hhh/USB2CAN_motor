@@ -43,6 +43,12 @@ struct TargetPoint {
   const char* source {"none"};
 };
 
+struct TargetError {
+  double forward {0.0};
+  double left {0.0};
+  double distance {0.0};
+};
+
 }  // namespace
 
 class VisionGoalTrackerNode : public rclcpp::Node {
@@ -110,6 +116,8 @@ private:
     cmd_topic_ = declare_parameter<std::string>("cmd_topic", cmd_topic_);
     publish_rate_ = declare_parameter<double>("publish_rate", publish_rate_);
     goal_timeout_ = declare_parameter<double>("goal_timeout", goal_timeout_);
+    target_loss_hold_time_ =
+      declare_parameter<double>("target_loss_hold_time", target_loss_hold_time_);
     odom_timeout_ = declare_parameter<double>("odom_timeout", odom_timeout_);
     require_odom_ = declare_parameter<bool>("require_odom", require_odom_);
     max_goal_distance_ = declare_parameter<double>("max_goal_distance", max_goal_distance_);
@@ -177,6 +185,7 @@ private:
 
     publish_rate_ = std::max(1.0, publish_rate_);
     goal_timeout_ = std::max(0.05, goal_timeout_);
+    target_loss_hold_time_ = std::max(0.0, target_loss_hold_time_);
     odom_timeout_ = std::max(0.05, odom_timeout_);
     max_realtime_distance_ = std::max(0.0, max_realtime_distance_);
     max_realtime_abs_y_ = std::max(0.0, max_realtime_abs_y_);
@@ -267,13 +276,12 @@ private:
 
   bool isGoalTargetValid(double x, double y, const char* source)
   {
-    const double distance_from_origin =
-      std::hypot(x, y);
-    if (max_goal_distance_ > 0.0 && distance_from_origin > max_goal_distance_) {
+    const TargetError error = targetErrorFromRobot(x, y);
+    if (max_goal_distance_ > 0.0 && error.distance > max_goal_distance_) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 1000,
-        "丢弃超距视觉目标: source=%s distance=%.2f max=%.2f x=%.2f y=%.2f",
-        source, distance_from_origin, max_goal_distance_, x, y);
+        "丢弃超距视觉目标: source=%s distance=%.2f max=%.2f world=(%.2f, %.2f) body=(forward %.2f, left %.2f)",
+        source, error.distance, max_goal_distance_, x, y, error.forward, error.left);
       return false;
     }
     return true;
@@ -318,13 +326,14 @@ private:
     if (!std::isfinite(x) || !std::isfinite(y)) {
       return false;
     }
-    if (max_realtime_distance_ > 0.0 && std::hypot(x, y) > max_realtime_distance_) {
+    const TargetError error = targetErrorFromRobot(x, y);
+    if (max_realtime_distance_ > 0.0 && error.distance > max_realtime_distance_) {
       return false;
     }
-    if (max_realtime_abs_y_ > 0.0 && std::abs(y) > max_realtime_abs_y_) {
+    if (max_realtime_abs_y_ > 0.0 && std::abs(error.left) > max_realtime_abs_y_) {
       return false;
     }
-    if (x < min_realtime_x_) {
+    if (error.forward < min_realtime_x_) {
       return false;
     }
     return true;
@@ -363,24 +372,23 @@ private:
 
     if (!fresh_goal || (require_odom_ && !fresh_odom)) {
       updateYawReferenceWhenIdle(fresh_goal, fresh_odom);
+      if (!fresh_goal && fresh_odom && has_last_tracked_cmd_ &&
+          target_loss_hold_time_ > 0.0) {
+        const double loss_age = (now_time - last_tracked_cmd_time_).seconds();
+        if (loss_age >= 0.0 && loss_age <= target_loss_hold_time_) {
+          cmd = last_tracked_cmd_;
+          cmd.angular.z = computeYawHoldCommand(fresh_odom);
+        }
+      }
+      cmd = limitCommandRate(now_time, cmd);
       cmd_pub_->publish(cmd);
-      rememberPublishedCommand(now_time, cmd);
       logState(now_time, fresh_goal, fresh_odom, target, cmd, false);
       return;
     }
 
-    const double current_x = fresh_odom ? latest_odom_.pose.pose.position.x : 0.0;
-    const double current_y = fresh_odom ? latest_odom_.pose.pose.position.y : 0.0;
-    const double yaw = (fresh_odom && use_odom_yaw_) ? latest_yaw_ : 0.0;
-
-    const double error_x_world = target.x - current_x;
-    const double error_y_world = target.y - current_y;
-    const double cos_yaw = std::cos(yaw);
-    const double sin_yaw = std::sin(yaw);
-    const double error_forward =
-      cos_yaw * error_x_world + sin_yaw * error_y_world - stop_forward_distance_;
-    const double raw_error_left =
-      -sin_yaw * error_x_world + cos_yaw * error_y_world;
+    const TargetError target_error = targetErrorFromRobot(target.x, target.y);
+    const double error_forward = target_error.forward - stop_forward_distance_;
+    const double raw_error_left = target_error.left;
     double error_left = raw_error_left;
     if (lateral_overshoot_distance_ > 1e-6 &&
         std::abs(raw_error_left) > lateral_overshoot_deadband_) {
@@ -429,6 +437,9 @@ private:
     cmd.angular.z = computeYawHoldCommand(fresh_odom);
 
     cmd = limitCommandRate(now_time, cmd);
+    last_tracked_cmd_ = cmd;
+    last_tracked_cmd_time_ = now_time;
+    has_last_tracked_cmd_ = true;
     cmd_pub_->publish(cmd);
     logState(now_time, fresh_goal, fresh_odom, target, cmd, lateral_only);
   }
@@ -595,10 +606,24 @@ private:
 
   double targetDistanceFromRobot(double x, double y) const
   {
-    if (has_odom_) {
-      return std::hypot(x - latest_odom_.pose.pose.position.x, y - latest_odom_.pose.pose.position.y);
-    }
-    return std::hypot(x, y);
+    return targetErrorFromRobot(x, y).distance;
+  }
+
+  TargetError targetErrorFromRobot(double x, double y) const
+  {
+    const double current_x = has_odom_ ? latest_odom_.pose.pose.position.x : 0.0;
+    const double current_y = has_odom_ ? latest_odom_.pose.pose.position.y : 0.0;
+    const double yaw = (has_odom_ && use_odom_yaw_) ? latest_yaw_ : 0.0;
+
+    const double error_x_world = x - current_x;
+    const double error_y_world = y - current_y;
+    const double cos_yaw = std::cos(yaw);
+    const double sin_yaw = std::sin(yaw);
+    TargetError error;
+    error.forward = cos_yaw * error_x_world + sin_yaw * error_y_world;
+    error.left = -sin_yaw * error_x_world + cos_yaw * error_y_world;
+    error.distance = std::hypot(error.forward, error.left);
+    return error;
   }
 
   void logState(
@@ -611,11 +636,17 @@ private:
     last_log_time_ = now_time;
 
     if (!fresh_goal) {
-      RCLCPP_WARN(get_logger(), "视觉目标超时，输出零速");
+      RCLCPP_WARN(
+        get_logger(),
+        "视觉目标超时，平滑过渡 cmd=(right %.2f, forward %.2f, yaw %.2f)",
+        cmd.linear.x, cmd.linear.y, cmd.angular.z);
       return;
     }
     if (require_odom_ && !fresh_odom) {
-      RCLCPP_WARN(get_logger(), "里程计超时，输出零速");
+      RCLCPP_WARN(
+        get_logger(),
+        "里程计超时，平滑刹停 cmd=(right %.2f, forward %.2f, yaw %.2f)",
+        cmd.linear.x, cmd.linear.y, cmd.angular.z);
       return;
     }
 
@@ -639,6 +670,7 @@ private:
 
   double publish_rate_ {50.0};
   double goal_timeout_ {0.3};
+  double target_loss_hold_time_ {0.20};
   double odom_timeout_ {0.3};
   bool require_odom_ {true};
   double max_goal_distance_ {7.0};
@@ -699,6 +731,7 @@ private:
   bool has_yaw_sample_ {false};
   bool has_realtime_speed_ {false};
   bool has_published_cmd_ {false};
+  bool has_last_tracked_cmd_ {false};
   bool use_realtime_target_ {false};
 
   rclcpp::Time last_goal_time_;
@@ -708,8 +741,10 @@ private:
   rclcpp::Time last_yaw_sample_time_;
   rclcpp::Time last_log_time_;
   rclcpp::Time last_cmd_publish_time_;
+  rclcpp::Time last_tracked_cmd_time_;
   rclcpp::Time auto_goal_correction_slow_until_;
   geometry_msgs::msg::Twist last_published_cmd_;
+  geometry_msgs::msg::Twist last_tracked_cmd_;
 
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr auto_goal_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pre_goal_sub_;

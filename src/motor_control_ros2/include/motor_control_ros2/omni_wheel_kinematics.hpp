@@ -36,8 +36,8 @@ class OmniWheelKinematics {
 public:
     /**
      * @brief 构造函数
-     * @param wheel_base_x 前后轮距 (m)，即前后轮之间的距离
-     * @param wheel_base_y 左右轮距 (m)，即左右轮之间的距离
+     * @param wheel_base_x X 方向轮距 (m)，即左右轮之间的距离
+     * @param wheel_base_y Y 方向轮距 (m)，即前后轮之间的距离
      * @param wheel_radius 轮子半径 (m)
      * @param install_angle 轮子安装角度 (度)，默认 45° (X 形布置)
      */
@@ -51,8 +51,8 @@ public:
     /**
      * @brief 逆运动学：底盘速度 → 4 个轮子速度
      * 
-     * @param vx 底盘前进速度 (m/s)，前进为正
-     * @param vy 底盘横向速度 (m/s)，左移为正
+     * @param vx 底盘 X 向速度 (m/s)，右移为正
+     * @param vy 底盘 Y 向速度 (m/s)，前进为正
      * @param wz 底盘旋转角速度 (rad/s)，逆时针为正
      * @return 4 个轮子的线速度 [FL, FR, RL, RR] (m/s)
      */
@@ -62,8 +62,8 @@ public:
      * @brief 正运动学：4 个轮子速度 → 底盘速度
      * 
      * @param wheel_velocities 4 个轮子的线速度 [FL, FR, RL, RR] (m/s)
-     * @param vx 底盘前进速度 (m/s)（输出）
-     * @param vy 底盘横向速度 (m/s)（输出）
+     * @param vx 底盘 X 向速度 (m/s)，右移为正（输出）
+     * @param vy 底盘 Y 向速度 (m/s)，前进为正（输出）
      * @param wz 底盘旋转角速度 (rad/s)（输出）
      */
     void forwardKinematics(
@@ -98,8 +98,8 @@ public:
     double getGearRatio() const { return GEAR_RATIO; }
 
 private:
-    double wheel_base_x_;      // 前后轮距的一半 (m)
-    double wheel_base_y_;      // 左右轮距的一半 (m)
+    double wheel_base_x_;      // X 方向轮距的一半 (m)
+    double wheel_base_y_;      // Y 方向轮距的一半 (m)
     double wheel_radius_;      // 轮子半径 (m)
     double install_angle_rad_; // 轮子安装角度 (弧度)
     

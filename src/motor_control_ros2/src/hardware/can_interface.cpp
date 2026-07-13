@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <termios.h>
 #include <unistd.h>
+#include <cerrno>
 #include <cstring>
 #include <iostream>
 #include <chrono>
@@ -204,12 +205,33 @@ bool CANInterface::sendRaw(uint32_t can_id, const uint8_t* data, size_t len) {
   }
   
   buildTxFrame(can_id, data, len);
-  
-  // 发送
-  ssize_t n = write(fd_, tx_buffer_, 30);
-  
+
+  size_t written = 0;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(5);
+  while (written < 30 && std::chrono::steady_clock::now() < deadline) {
+    const ssize_t n = write(fd_, tx_buffer_ + written, 30 - written);
+    if (n > 0) {
+      written += static_cast<size_t>(n);
+      continue;
+    }
+    if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+      break;
+    }
+
+    fd_set write_fds;
+    FD_ZERO(&write_fds);
+    FD_SET(fd_, &write_fds);
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 1000;
+    const int ret = select(fd_ + 1, nullptr, &write_fds, nullptr, &tv);
+    if (ret < 0 && errno != EINTR) {
+      break;
+    }
+  }
+
   std::lock_guard<std::mutex> lock(stats_mutex_);
-  if (n == 30) {
+  if (written == 30) {
     stats_.tx_frames++;
     return true;
   } else {

@@ -6,6 +6,7 @@ WS_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 ROS_SETUP="${ROS_SETUP:-/opt/ros/humble/setup.bash}"
 START_RVIZ="${START_RVIZ:-0}"
 START_FRONTVEHICLE="${START_FRONTVEHICLE:-1}"
+START_MCU_ODOM="${START_MCU_ODOM:-auto}"
 ROS_DOMAIN_ID_VALUE="${ROS_DOMAIN_ID:-88}"
 
 CONTROL_CONFIG="$WS_DIR/src/motor_control_ros2/config/control_params.yaml"
@@ -61,6 +62,17 @@ echo "设备状态:"
 ls -l /dev/robocon_usb2can 2>/dev/null || echo "  未找到 /dev/robocon_usb2can (USB2CAN, 2e88:4603)"
 ls -l /dev/robocon_rc 2>/dev/null || echo "  未找到 /dev/robocon_rc (STM32 RC CDC, 0483:5740)"
 ls -l /dev/robocon_odom 2>/dev/null || echo "  未找到 /dev/robocon_odom (QinHeng odom, 1a86:7522)"
+if [ "$START_MCU_ODOM" = "auto" ]; then
+  if [ -e /dev/robocon_odom ]; then
+    START_MCU_ODOM=1
+  else
+    START_MCU_ODOM=0
+    echo "  自动跳过 mcu_odom_bridge_node：/dev/robocon_odom 不存在"
+  fi
+elif [ "$START_MCU_ODOM" = "1" ] && [ ! -e /dev/robocon_odom ]; then
+  START_MCU_ODOM=0
+  echo "  START_MCU_ODOM=1 但 /dev/robocon_odom 不存在，跳过 mcu_odom_bridge_node"
+fi
 mkdir -p "$RUN_LOG_DIR"
 
 ENV_VARS="unset CYCLONEDDS_URI && export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp && export ROS_DOMAIN_ID=$ROS_DOMAIN_ID_VALUE"
@@ -81,7 +93,10 @@ pkill -9 -f "motor_control_node|omni_chassis_control_node|rc_usb_control_node|vi
 tmux kill-session -t "$SESSION" 2>/dev/null
 sleep 1
 
-NODE_COUNT=5
+NODE_COUNT=4
+if [ "$START_MCU_ODOM" = "1" ]; then
+  NODE_COUNT=$((NODE_COUNT + 1))
+fi
 if [ "$START_FRONTVEHICLE" = "1" ]; then
   NODE_COUNT=$((NODE_COUNT + 1))
 fi
@@ -94,16 +109,22 @@ echo "启动 $NODE_COUNT 个节点..."
 
 PANE_MOTOR="$(tmux new-session -d -s "$SESSION" -n core -P -F "#{pane_id}" bash)"
 PANE_OMNI="$(tmux split-window -t "$PANE_MOTOR" -h -P -F "#{pane_id}" bash)"
-PANE_MCU="$(tmux split-window -t "$PANE_MOTOR" -v -P -F "#{pane_id}" bash)"
 PANE_RC="$(tmux split-window -t "$PANE_OMNI" -v -P -F "#{pane_id}" bash)"
-PANE_VISION="$(tmux split-window -t "$PANE_MCU" -v -P -F "#{pane_id}" bash)"
+if [ "$START_MCU_ODOM" = "1" ]; then
+  PANE_MCU="$(tmux split-window -t "$PANE_MOTOR" -v -P -F "#{pane_id}" bash)"
+  PANE_VISION="$(tmux split-window -t "$PANE_MCU" -v -P -F "#{pane_id}" bash)"
+else
+  PANE_VISION="$(tmux split-window -t "$PANE_MOTOR" -v -P -F "#{pane_id}" bash)"
+fi
 
 send_node "$PANE_MOTOR" "motor_control_node" \
   "ros2 run motor_control_ros2 motor_control_node --ros-args -p control_config_file:=$CONTROL_CONFIG -p config_file:=$MOTOR_CONFIG -p pid_config_file:=$PID_CONFIG"
 send_node "$PANE_OMNI" "omni_chassis_control_node" \
   "ros2 run motor_control_ros2 omni_chassis_control_node --ros-args -p config_file:=$CHASSIS_CONFIG"
-send_node "$PANE_MCU" "mcu_odom_bridge_node" \
-  "ros2 run wheel_imu_ekf mcu_odom_bridge_node --ros-args --params-file $MCU_CONFIG"
+if [ "$START_MCU_ODOM" = "1" ]; then
+  send_node "$PANE_MCU" "mcu_odom_bridge_node" \
+    "ros2 run wheel_imu_ekf mcu_odom_bridge_node --ros-args --params-file $MCU_CONFIG"
+fi
 send_node "$PANE_RC" "rc_usb_control_node" \
   "ros2 run motor_control_ros2 rc_usb_control_node --ros-args --params-file $RC_USB_CONFIG"
 send_node "$PANE_VISION" "vision_goal_tracker_node" \
@@ -127,4 +148,4 @@ echo ""
 echo "tmux attach -t $SESSION"
 echo "日志目录: $RUN_LOG_DIR"
 echo "ROS_DOMAIN_ID: $ROS_DOMAIN_ID_VALUE"
-echo "左拨杆上档: 手动遥控 | 左拨杆中档: 硬急停零速 | 左拨杆下档: 视觉速度(/vision/cmd_vel) | START_FRONTVEHICLE=0 可不启动相机 | START_RVIZ=1 可额外启动 RViz"
+echo "左拨杆上档: 手动遥控 | 左拨杆中档: 硬急停零速 | 左拨杆下档: 视觉速度(/vision/cmd_vel) | START_FRONTVEHICLE=0 可不启动相机 | START_MCU_ODOM=1/0/auto 控制 MCU odom | START_RVIZ=1 可额外启动 RViz"

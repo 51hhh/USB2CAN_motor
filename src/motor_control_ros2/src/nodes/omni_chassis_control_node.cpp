@@ -427,17 +427,20 @@ private:
 
     const double cos_yaw = std::cos(current_yaw);
     const double sin_yaw = std::sin(current_yaw);
-    const double error_x_body = cos_yaw * error_x_world + sin_yaw * error_y_world;
-    const double error_y_body = -sin_yaw * error_x_world + cos_yaw * error_y_world;
+    const double error_forward_body = cos_yaw * error_x_world + sin_yaw * error_y_world;
+    const double error_left_body = -sin_yaw * error_x_world + cos_yaw * error_y_world;
 
-    const double target_vx = position_pid_x_.calculate(error_x_body, 0.0);
-    const double target_vy = position_pid_y_.calculate(error_y_body, 0.0);
+    const double target_forward = position_pid_x_.calculate(error_forward_body, 0.0);
+    const double target_right = -position_pid_y_.calculate(error_left_body, 0.0);
     const double target_wz = position_pid_yaw_.calculate(error_yaw, 0.0);
 
     const auto& twist = latest_odom_.twist.twist;
-    cmd.linear.x = velocity_pid_x_.calculate(target_vx, twist.linear.x);
-    cmd.linear.y = velocity_pid_y_.calculate(target_vy, twist.linear.y);
-    cmd.angular.z = velocity_pid_yaw_.calculate(target_wz, twist.angular.z);
+    const double feedback_right = -twist.linear.y;
+    const double feedback_forward = twist.linear.x;
+    const double feedback_yaw = yaw_feedback_sign_ * twist.angular.z;
+    cmd.linear.x = velocity_pid_x_.calculate(target_right, feedback_right);
+    cmd.linear.y = velocity_pid_y_.calculate(target_forward, feedback_forward);
+    cmd.angular.z = velocity_pid_yaw_.calculate(target_wz, feedback_yaw);
     clampCommand(cmd);
     return cmd;
   }
