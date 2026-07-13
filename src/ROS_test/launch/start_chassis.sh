@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WS_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 ROS_SETUP="${ROS_SETUP:-/opt/ros/humble/setup.bash}"
 START_RVIZ="${START_RVIZ:-0}"
+START_FRONTVEHICLE="${START_FRONTVEHICLE:-1}"
 ROS_DOMAIN_ID_VALUE="${ROS_DOMAIN_ID:-88}"
 
 CONTROL_CONFIG="$WS_DIR/src/motor_control_ros2/config/control_params.yaml"
@@ -15,6 +16,7 @@ RC_USB_CONFIG="$WS_DIR/src/motor_control_ros2/config/rc_usb_control_params.yaml"
 VISION_GOAL_CONFIG="$WS_DIR/src/motor_control_ros2/config/vision_goal_tracker_params.yaml"
 MCU_CONFIG="$WS_DIR/src/wheel_imu_ekf/config/mcu_bridge.yaml"
 RVIZ_CONFIG="$WS_DIR/src/wheel_imu_ekf/rviz/mcu_odom.rviz"
+FRONTVEHICLE_RUN="${FRONTVEHICLE_RUN:-/home/nvidia/frontvehicle/run.sh}"
 LOG_ROOT="$WS_DIR/log/chassis_start"
 RUN_LOG_DIR="$LOG_ROOT/$(date +%Y%m%d_%H%M%S)"
 
@@ -48,6 +50,12 @@ if [ "$START_RVIZ" = "1" ] && [ ! -f "$RVIZ_CONFIG" ]; then
   exit 1
 fi
 
+if [ "$START_FRONTVEHICLE" = "1" ] && [ ! -x "$FRONTVEHICLE_RUN" ]; then
+  echo "frontvehicle 启动脚本不存在或不可执行: $FRONTVEHICLE_RUN"
+  echo "可通过 START_FRONTVEHICLE=0 只启动底盘，或 FRONTVEHICLE_RUN=/path/to/run.sh 指定"
+  exit 1
+fi
+
 echo ""
 echo "设备状态:"
 ls -l /dev/robocon_usb2can 2>/dev/null || echo "  未找到 /dev/robocon_usb2can (USB2CAN, 2e88:4603)"
@@ -69,13 +77,16 @@ send_node() {
 }
 
 echo "清理旧进程..."
-pkill -9 -f "motor_control_node|omni_chassis_control_node|rc_usb_control_node|vision_goal_tracker_node|mcu_odom_bridge_node|joystick_control_node|cmd_vel_mux_node|joy_node|rviz2" 2>/dev/null
+pkill -9 -f "motor_control_node|omni_chassis_control_node|rc_usb_control_node|vision_goal_tracker_node|mcu_odom_bridge_node|frontvehicle_tracker|joystick_control_node|cmd_vel_mux_node|joy_node|rviz2" 2>/dev/null
 tmux kill-session -t "$SESSION" 2>/dev/null
 sleep 1
 
 NODE_COUNT=5
+if [ "$START_FRONTVEHICLE" = "1" ]; then
+  NODE_COUNT=$((NODE_COUNT + 1))
+fi
 if [ "$START_RVIZ" = "1" ]; then
-  NODE_COUNT=6
+  NODE_COUNT=$((NODE_COUNT + 1))
 fi
 
 echo ""
@@ -98,6 +109,12 @@ send_node "$PANE_RC" "rc_usb_control_node" \
 send_node "$PANE_VISION" "vision_goal_tracker_node" \
   "ros2 run motor_control_ros2 vision_goal_tracker_node --ros-args --params-file $VISION_GOAL_CONFIG"
 
+if [ "$START_FRONTVEHICLE" = "1" ]; then
+  PANE_FRONTVEHICLE="$(tmux new-window -t "$SESSION" -n frontvehicle -P -F "#{pane_id}" bash)"
+  send_node "$PANE_FRONTVEHICLE" "frontvehicle_tracker" \
+    "\"$FRONTVEHICLE_RUN\" --no-gui --ros"
+fi
+
 if [ "$START_RVIZ" = "1" ]; then
   PANE_RVIZ="$(tmux new-window -t "$SESSION" -n rviz -P -F "#{pane_id}" bash)"
   send_node "$PANE_RVIZ" "rviz2" "rviz2 -d $RVIZ_CONFIG"
@@ -110,4 +127,4 @@ echo ""
 echo "tmux attach -t $SESSION"
 echo "日志目录: $RUN_LOG_DIR"
 echo "ROS_DOMAIN_ID: $ROS_DOMAIN_ID_VALUE"
-echo "左拨杆上档: 手动遥控 | 左拨杆中档: 硬急停零速 | 左拨杆下档: 视觉速度(/vision/cmd_vel) | START_RVIZ=1 可额外启动 RViz"
+echo "左拨杆上档: 手动遥控 | 左拨杆中档: 硬急停零速 | 左拨杆下档: 视觉速度(/vision/cmd_vel) | START_FRONTVEHICLE=0 可不启动相机 | START_RVIZ=1 可额外启动 RViz"

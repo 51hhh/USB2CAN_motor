@@ -80,8 +80,10 @@ public:
       cmd_pose_topic_, 20,
       std::bind(&OmniChassisControlNode::cmdPoseCallback, this, std::placeholders::_1));
 
+    auto odom_qos = rclcpp::SensorDataQoS();
+    odom_qos.keep_last(50);
     odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-      odom_topic_, 50,
+      odom_topic_, odom_qos,
       std::bind(&OmniChassisControlNode::odomCallback, this, std::placeholders::_1));
 
     estop_sub_ = this->create_subscription<std_msgs::msg::Bool>(
@@ -344,6 +346,15 @@ private:
       has_odom_ && ((now - last_odom_time_).seconds() <= cmd_timeout_);
 
     geometry_msgs::msg::Twist target = velocity_target_;
+    if (isZeroVelocityTarget(target)) {
+      velocity_pid_x_.reset();
+      velocity_pid_y_.reset();
+      velocity_pid_yaw_.reset();
+      has_yaw_hold_reference_ = false;
+      last_yaw_hold_error_ = 0.0;
+      return cmd;
+    }
+
     target.angular.z = applyYawHold(target.angular.z, fresh_odom);
 
     if (isZeroVelocityTarget(target)) {

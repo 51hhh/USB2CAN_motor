@@ -91,6 +91,7 @@ private:
   double command_timeout_{0.3};
   double diagnostics_interval_sec_{1.0};
   double vision_timeout_{0.3};
+  double serial_stale_reconnect_sec_{2.0};
 
   int manual_switch_{1};
   int estop_switch_{3};

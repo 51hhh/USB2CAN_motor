@@ -1,0 +1,46 @@
+vision_goal_tracker_node:
+  ros__parameters:
+    # realtime: 不需要 --auto-goal，直接追 /frontvehicle/ball/realtime。
+    # auto_goal: 只追 /frontvehicle/auto/goal_pose。
+    # auto_or_realtime: 有 auto_goal 时优先落点，否则用 realtime。
+    target_source: "auto_or_realtime"
+    realtime_topic: "/frontvehicle/ball/realtime"
+    goal_topic: "/frontvehicle/auto/goal_pose"
+    # 视觉目标在 frontvehicle_world 下，必须配同一坐标系的 ZED odom。
+    odom_topic: "/frontvehicle/vision/zed_odom"
+    cmd_topic: "/vision/cmd_vel"
+
+    publish_rate: 50.0
+    goal_timeout: 0.8
+    odom_timeout: 0.3
+    require_odom: true
+
+    # 二次保护：auto_goal 只收 7m 内；realtime 允许超过 5m，但丢弃明显异常远点。
+    max_goal_distance: 7.0
+    max_realtime_distance: 14.0
+    max_realtime_abs_y: 5.0
+    min_realtime_x: 0.0
+    auto_goal_realtime_lockout: 6.0
+    auto_goal_hold_time: 6.0
+    goal_tolerance: 0.10
+    stop_forward_distance: 0.20
+
+    # 视觉坐标默认约定: x=前方, y=左侧。
+    # 底盘速度约定: linear.y=前进, linear.x=右移。
+    kp_forward: 2.8
+    kp_lateral: 2.0
+    max_forward_velocity: 3.8
+    max_lateral_velocity: 2.2
+    max_far_lateral_velocity: 0.8
+    far_lateral_distance: 1.5
+    max_backward_velocity: 2.2
+    max_linear_accel: 12.0
+    forward_sign: 1.0
+    lateral_sign: -1.0
+    use_odom_yaw: true
+
+    # 持球阶段实时球点通常变化很慢：只做左右对齐，不主动前进。
+    # 球点平面速度超过阈值后认为已经抛出，开始前进+横向追。
+    realtime_lateral_only_when_slow: false
+    realtime_chase_min_speed: 0.4
+    realtime_speed_alpha: 0.25

@@ -87,6 +87,7 @@ void RCUsbControlNode::configureParameters()
   declare_parameter("frame_timeout_sec", command_timeout_);
   declare_parameter("diagnostics_interval_sec", diagnostics_interval_sec_);
   declare_parameter("vision_timeout", vision_timeout_);
+  declare_parameter("serial_stale_reconnect_sec", serial_stale_reconnect_sec_);
 
   declare_parameter("manual_switch", manual_switch_);
   declare_parameter("estop_switch", estop_switch_);
@@ -143,6 +144,7 @@ void RCUsbControlNode::configureParameters()
   }
   get_parameter("diagnostics_interval_sec", diagnostics_interval_sec_);
   get_parameter("vision_timeout", vision_timeout_);
+  get_parameter("serial_stale_reconnect_sec", serial_stale_reconnect_sec_);
 
   get_parameter("manual_switch", manual_switch_);
   get_parameter("estop_switch", estop_switch_);
@@ -160,6 +162,7 @@ void RCUsbControlNode::configureParameters()
   diagnostics_interval_sec_ = std::max(0.2, diagnostics_interval_sec_);
   command_timeout_ = std::max(0.05, command_timeout_);
   vision_timeout_ = std::max(0.05, vision_timeout_);
+  serial_stale_reconnect_sec_ = std::max(command_timeout_ + 0.1, serial_stale_reconnect_sec_);
   deadzone_ = clamp(deadzone_, 0.0, 0.95);
   axis_max_ = std::max(1.0, axis_max_);
   max_linear_velocity_ = std::max(0.0, max_linear_velocity_);
@@ -217,6 +220,28 @@ void RCUsbControlNode::serialReadLoop()
     }
 
     const int fd = serial_fd_.load();
+    {
+      std::lock_guard<std::mutex> lock(command_mutex_);
+      const auto node_now = now();
+      const double stale_sec = has_valid_frame_
+        ? (node_now - last_frame_time_).seconds()
+        : 0.0;
+      if (has_valid_frame_ && stale_sec > serial_stale_reconnect_sec_) {
+        RCLCPP_WARN_THROTTLE(
+          get_logger(), *get_clock(), 1000,
+          "遥控有效帧停止 %.2fs，重连串口: %s",
+          stale_sec, serial_port_.c_str());
+        has_valid_frame_ = false;
+        control_mode_ = ControlMode::ESTOP;
+        last_manual_cmd_ = zeroTwist();
+        last_frame_time_ = node_now;
+        closeSerialPort();
+        next_reconnect = std::chrono::steady_clock::now() +
+          std::chrono::milliseconds(serial_reconnect_interval_ms_);
+        continue;
+      }
+    }
+
     const int n = read(fd, chunk.data(), chunk.size());
     if (n > 0) {
       onSerialData(chunk.data(), static_cast<std::size_t>(n));

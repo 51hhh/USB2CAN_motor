@@ -3,7 +3,7 @@ vision_goal_tracker_node:
     # realtime: 不需要 --auto-goal，直接追 /frontvehicle/ball/realtime。
     # auto_goal: 只追 /frontvehicle/auto/goal_pose。
     # auto_or_pre_goal: 有 auto_goal 时优先正式落点，否则用 pre_goal；不追 realtime。
-    target_source: "auto_or_realtime"
+    target_source: "auto_goal"
     realtime_topic: "/frontvehicle/ball/realtime"
     pre_goal_topic: "/frontvehicle/auto/pre_goal_pose"
     goal_topic: "/frontvehicle/auto/goal_pose"
@@ -22,9 +22,6 @@ vision_goal_tracker_node:
     max_realtime_abs_y: 5.0
     min_realtime_x: 0.0
     auto_goal_realtime_lockout: 6.0
-    realtime_switch_enter_distance: 6.0
-    realtime_switch_exit_distance: 6.5
-    realtime_timeout: 0.3
     auto_goal_hold_time: 0.6
     auto_goal_correction_jump_gate: 0.6
     auto_goal_correction_slow_sec: 0.25
@@ -50,13 +47,12 @@ vision_goal_tracker_node:
     reverse_deadband: 0.2
     forward_sign: 1.0
     lateral_sign: -1.0
-    use_odom_yaw: true
-    yaw_hold_enabled: true       # 用 ZED odom/IMU 的 yaw 压住机械右偏
-    yaw_hold_kp: 1.8             # 右偏压不住可小步加到 2.2
-    yaw_hold_kd: 0.12            # yaw 角速度阻尼，减少来回摆
-    max_yaw_velocity: 0.35       # yaw 修正角速度上限(rad/s)
-    yaw_deadband: 0.025
-    yaw_sign: 1.0                # 若开启后右偏更严重，改成 -1.0
+    use_odom_yaw: false
+    yaw_hold_enabled: false
+    yaw_hold_kp: 1.2
+    max_yaw_velocity: 0.6
+    yaw_deadband: 0.04
+    yaw_sign: 1.0
 
     # 持球阶段实时球点通常变化很慢：只做左右对齐，不主动前进。
     # 球点平面速度超过阈值后认为已经抛出，开始前进+横向追。

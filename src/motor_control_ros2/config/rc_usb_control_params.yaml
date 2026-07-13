@@ -36,6 +36,7 @@ rc_usb_control_node:
     command_timeout: 0.3
     vision_timeout: 0.3
     diagnostics_interval_sec: 1.0
+    serial_stale_reconnect_sec: 2.0
     publish_zero_before_first_frame: true
 
     # DJI DBUS 三档拨杆值: UP=1, MID=3, DOWN=2

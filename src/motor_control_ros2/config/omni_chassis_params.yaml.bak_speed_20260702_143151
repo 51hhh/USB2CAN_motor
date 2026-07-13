@@ -3,30 +3,24 @@ omni_chassis_control_node:
     control_frequency: 100.0
     cmd_vel_topic: "/cmd_vel"
     cmd_pose_topic: "/cmd_pose"
-    odom_topic: "/frontvehicle/vision/zed_odom"
+    odom_topic: "/odom"
     estop_topic: "/chassis/estop"
     default_mode: "velocity"
     # open_loop: 遥控速度直接做逆运动学输出轮速，暂不依赖 /odom.twist。
     # closed_loop: 速度前馈 + /odom.twist PID补偿，让码盘修正实际 vx/vy/yaw。
-    velocity_control_mode: "open_loop"
+    velocity_control_mode: "closed_loop"
 
     wheel_base_x: 0.88
     wheel_base_y: 0.88
     wheel_radius: 0.1062
     install_angle: 45.0
 
-    max_linear_velocity: 6.0
+    max_linear_velocity: 3.8
     max_angular_velocity: 2.0
     # 逆运动学后单轮线速度上限；超过时四轮按比例统一缩放，避免单轮饱和破坏方向。
-    max_wheel_linear_velocity: 6.5
+    max_wheel_linear_velocity: 5.3
     cmd_timeout: 0.5
     zero_target_deadband: 0.001
-    yaw_feedback_sign: -1.0
-    yaw_hold_enabled: true
-    yaw_hold_kp: 2.4
-    yaw_hold_max_angular_velocity: 1.0
-    yaw_hold_deadband: 0.015
-    yaw_hold_release_angular_velocity: 0.05
     position_timeout: 1.0
     goal_tolerance_xy: 0.02
     goal_tolerance_yaw: 0.05
@@ -46,7 +40,7 @@ omni_chassis_control_node:
       ki: 0.0
       kd: 0.0
       i_max: 0.0
-      out_max: 1.0
+      out_max: 0.7
       dead_zone: 0.03
 
     velocity_pid_y:
@@ -54,16 +48,16 @@ omni_chassis_control_node:
       ki: 0.0
       kd: 0.0
       i_max: 0.0
-      out_max: 1.0
+      out_max: 0.7
       dead_zone: 0.03
 
     velocity_pid_yaw:
-      kp: 0.75
+      kp: 0.0
       ki: 0.0
       kd: 0.0
       i_max: 0.0
-      out_max: 0.40
-      dead_zone: 0.01
+      out_max: 0.0
+      dead_zone: 0.03
 
     position_pid_x:
       kp: 1.2
