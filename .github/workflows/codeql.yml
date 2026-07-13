@@ -1,0 +1,74 @@
+name: CodeQL
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  schedule:
+    # 每周一 02:00 UTC 执行安全扫描。
+    - cron: "0 2 * * 1"
+
+jobs:
+  analyze:
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    env:
+      ROS_DISTRO: humble
+      WORKSPACE_SRC_PATH: ${{ github.workspace }}/src
+      COLCON_PACKAGES_ARG: --packages-up-to motor_control_ros2
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [cpp, python]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Hold Firefox to avoid snap installation
+        if: matrix.language == 'cpp'
+        run: |
+          sudo apt-mark hold firefox firefox-locale-en firefox-locale-zh-hans firefox-locale-zh-hant || true
+
+      - name: Setup ROS 2 Humble
+        if: matrix.language == 'cpp'
+        uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: humble
+
+      - name: Install system tools
+        if: matrix.language == 'cpp'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-colcon-common-extensions python3-rosdep
+
+      - name: Init rosdep
+        if: matrix.language == 'cpp'
+        run: |
+          sudo rosdep init || true
+          rosdep update
+
+      - name: Install dependencies
+        if: matrix.language == 'cpp'
+        run: rosdep install --from-paths "${WORKSPACE_SRC_PATH}" --ignore-src -r -y --rosdistro ${ROS_DISTRO}
+
+      - name: Build cpp for CodeQL
+        if: matrix.language == 'cpp'
+        run: |
+          source /opt/ros/${ROS_DISTRO}/setup.bash
+          colcon build --event-handlers console_cohesion+ ${COLCON_PACKAGES_ARG}
+
+      - name: Autobuild
+        if: matrix.language == 'python'
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3

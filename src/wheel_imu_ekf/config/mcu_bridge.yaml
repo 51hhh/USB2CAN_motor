@@ -1,0 +1,15 @@
+# MCU Odometry Bridge 配置
+# 解析STM32固件ODOM_STATE帧 → ROS2 Odometry
+mcu_odom_bridge_node:
+  ros__parameters:
+    # 串口配置
+    serial_port: "/dev/robocon_odom"
+    baud_rate: 115200
+
+    # ROS话题
+    odom_topic: "/odom"
+
+    # TF配置
+    publish_tf: true
+    odom_frame: "odom"
+    base_frame: "base_link"

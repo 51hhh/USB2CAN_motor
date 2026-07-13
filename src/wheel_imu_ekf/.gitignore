@@ -1,0 +1,26 @@
+# ROS2 Build artifacts
+build/
+install/
+log/
+*.pyc
+__pycache__/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ROS
+*.bag
+*.db3
+
+# Compiled
+*.o
+*.so
+*.a

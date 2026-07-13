@@ -1,0 +1,53 @@
+# DJI DBUS 遥控器经 STM32 USB CDC 转发后的上位机节点。
+# 固件帧格式对齐 RM-C-board-volleyball/Core/application/rc_forward.h:
+# 24 字节固定帧，0xA55A，小端，CRC16/Modbus。
+rc_usb_control_node:
+  ros__parameters:
+    serial_port: "/dev/robocon_rc"
+    baud_rate: 115200
+
+    cmd_vel_topic: "/cmd_vel"
+    estop_topic: "/chassis/estop"
+    vision_cmd_vel_topic: "/vision/cmd_vel"
+    enable_vision_passthrough: true
+
+    # 遥控器帧字段来自 rc_forward.h:
+    # lx: 左摇杆左右，右推为正
+    # ly: 左摇杆前后，前推为正
+    # rx: 右摇杆左右，右推为正，用于旋转
+    # ry: 右摇杆前后，当前底盘控制未使用
+    #
+    # 当前底盘开环控制语义:
+    # linear.x: 右/左平移速度
+    # linear.y: 前/后平移速度
+    # angular.z: 旋转角速度
+    #
+    # 实测修正:
+    # lx -> linear.x, ly -> linear.y, rx -> angular.z
+    axis_max: 660.0
+    deadzone: 0.05
+    max_linear_velocity: 1.5
+    max_angular_velocity: 2.0
+    invert_linear_x: false
+    invert_linear_y: false
+    invert_angular_z: false
+
+    publish_rate: 50.0
+    command_timeout: 0.3
+    vision_timeout: 0.3
+    diagnostics_interval_sec: 1.0
+    serial_stale_reconnect_sec: 2.0
+    publish_zero_before_first_frame: true
+
+    # DJI DBUS 三档拨杆值: UP=1, MID=3, DOWN=2
+    # 当前使用物理左拨杆，对应帧内 sw_left 字段。
+    # 左拨杆上档: 手动遥控
+    # 左拨杆中档: 硬急停，/chassis/estop=true，底盘电机直接给 0 速度
+    # 左拨杆下档: 视觉速度输入
+    mode_switch_field: "left"
+    manual_switch: 1
+    estop_switch: 3
+    vision_switch: 2
+
+    serial_reconnect_interval_ms: 1000
+    serial_read_chunk: 256

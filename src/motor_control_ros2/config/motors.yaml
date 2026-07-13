@@ -1,0 +1,16 @@
+can_interfaces:
+- device: /dev/robocon_usb2can
+  baudrate: 921600
+  motors:
+  - name: DJI3508_1
+    type: GM3508
+    id: 1
+  - name: DJI3508_2
+    type: GM3508
+    id: 2
+  - name: DJI3508_3
+    type: GM3508
+    id: 3
+  - name: DJI3508_4
+    type: GM3508
+    id: 4
