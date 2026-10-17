@@ -16,6 +16,13 @@ def _clip(value, limit):
     return min(max(value,-limit),limit)
 
 
+def _limit_velocity(command, limits):
+    vx,vy,wz=command
+    planar=math.hypot(vx/limits.velocity[0],vy/limits.velocity[1])
+    scale=1/max(1.,planar)
+    return vx*scale,vy*scale,_clip(wz,limits.velocity[2])
+
+
 @dataclass(frozen=True)
 class Limits:
     velocity: tuple[float,float,float]
@@ -52,12 +59,12 @@ def mix(classic, action, limits, previous=(0,0,0), dt=.02, *, classic_fresh=True
         residual=(0.,0.,0.)
         mode="classic_only_rl_timeout"
     requested=tuple(base+delta for base,delta in zip(classic,residual))
-    vx,vy,wz=requested
-    planar=math.hypot(vx/limits.velocity[0],vy/limits.velocity[1])
-    scale=1/max(1.,planar)
-    limited=(vx*scale,vy*scale,_clip(wz,limits.velocity[2]))
+    limited=_limit_velocity(requested,limits)
     if not math.isfinite(dt) or dt<=0:raise ValueError("dt must be positive and finite")
     output=tuple(old+_clip(new-old,acceleration*dt)
                  for old,new,acceleration in zip(previous,limited,limits.acceleration))
+    # Axis-wise slew can leave the planar ellipse while changing direction;
+    # reapply the public command envelope just like chassis_control_node.cpp.
+    output=_limit_velocity(output,limits)
     saturated=any(abs(a-b)>1e-12 for a,b in zip(requested,output))
     return output,mode,saturated

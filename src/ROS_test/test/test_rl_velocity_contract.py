@@ -25,6 +25,12 @@ class ContractTest(unittest.TestCase):
     def test_action_range_is_enforced(self):
         with self.assertRaises(ValueError):mix((0,0,0),(1.01,0,0),self.limits)
 
+    def test_axis_slew_cannot_escape_planar_envelope(self):
+        command,_,saturated=mix((2,-1,0),(0,0,0),self.limits,
+                                previous=(-1.6,.6,0),dt=.1)
+        self.assertLessEqual(math.hypot(command[0]/2,command[1]),1+1e-12)
+        self.assertTrue(saturated)
+
     def test_recorder_contains_rsi_required_and_safety_columns(self):
         header=set(HEADER)
         required={"timestamp_s","cmd_vx","cmd_vy","cmd_wz","pose_x","pose_y","pose_yaw",
