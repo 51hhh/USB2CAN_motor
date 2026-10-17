@@ -94,16 +94,19 @@ void SteerWheelKinematics::forwardKinematics(
     double vx_rr = rr.velocity * std::cos(rr_angle_rad);
     double vy_rr = rr.velocity * std::sin(rr_angle_rad);
     
-    // 使用最小二乘法求解底盘速度
-    // 简化方法：取 4 个轮子的平均值
+    // 对四个模块的八个速度分量求最小二乘刚体速度：
+    // vx_i = vx - wz*y_i, vy_i = vy + wz*x_i。
+    // 模块关于底盘中心对称，因此 A^T A 的交叉项为零。
     vx = (vx_fl + vx_fr + vx_rl + vx_rr) / 4.0;
     vy = (vy_fl + vy_fr + vy_rl + vy_rr) / 4.0;
-    
-    // 计算角速度（从轮子速度差）
-    // wz = (vy_right - vy_left) / wheel_base_y
-    double vy_left = (vy_fl + vy_rl) / 2.0;
-    double vy_right = (vy_fr + vy_rr) / 2.0;
-    wz = (vy_right - vy_left) / wheel_base_y_;
+
+    const double numerator =
+        -ly_ * vx_fl + lx_ * vy_fl +
+         ly_ * vx_fr + lx_ * vy_fr +
+        -ly_ * vx_rl - lx_ * vy_rl +
+         ly_ * vx_rr - lx_ * vy_rr;
+    const double denominator = 4.0 * (lx_ * lx_ + ly_ * ly_);
+    wz = denominator > 1e-12 ? numerator / denominator : 0.0;
 }
 
 double SteerWheelKinematics::optimizeSteerAngle(

@@ -1,519 +1,536 @@
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/twist.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <yaml-cpp/yaml.h>
 
 #include "motor_control_ros2/steer_wheel_kinematics.hpp"
 #include "motor_control_ros2/msg/chassis_state.hpp"
-#include "motor_control_ros2/msg/chassis_command.hpp"
 #include "motor_control_ros2/msg/steer_wheel_state.hpp"
 #include "motor_control_ros2/msg/dji_motor_command_advanced.hpp"
 #include "motor_control_ros2/msg/dji_motor_state.hpp"
 
 #include <algorithm>
-#include <map>
-#include <string>
-#include <memory>
+#include <array>
 #include <chrono>
+#include <cmath>
+#include <functional>
+#include <map>
+#include <memory>
+#include <stdexcept>
+#include <string>
 
 namespace motor_control {
+namespace msg = motor_control_ros2::msg;
 
-/**
- * @brief 底盘控制节点
- * 
- * 功能：
- * - 订阅底盘速度命令（默认 /cmd_vel，可由配置文件修改）
- * - 运动学逆解算 → 4 个舵轮命令
- * - 发布 DJI 电机控制命令
- * - 从电机反馈计算里程计
- * - 发布底盘状态
- */
 class ChassisControlNode : public rclcpp::Node {
 public:
-    ChassisControlNode() : Node("chassis_control_node") {
-        RCLCPP_INFO(this->get_logger(), "正在初始化底盘控制节点...");
-        
-        // 自动加载配置文件
-        std::string config_file;
-        try {
-            config_file = ament_index_cpp::get_package_share_directory("motor_control_ros2") + 
-                         "/config/chassis_params.yaml";
-            RCLCPP_INFO(this->get_logger(), "正在加载配置文件: %s", config_file.c_str());
-            loadChassisParams(config_file);
-        } catch (const std::exception& e) {
-            RCLCPP_ERROR(this->get_logger(), 
-                "底盘控制节点初始化失败: %s", e.what());
-            RCLCPP_ERROR(this->get_logger(), 
-                "配置文件路径: %s", config_file.c_str());
-            RCLCPP_ERROR(this->get_logger(), 
-                "请确保配置文件存在且格式正确");
-            throw;  // 重新抛出异常,终止节点启动
-        }
-        
-        RCLCPP_INFO(this->get_logger(), 
-            "底盘控制节点启动成功 - 轮距: %.3fm, 轴距: %.3fm, 轮半径: %.3fm",
-            wheel_base_x_, wheel_base_y_, wheel_radius_);
-        RCLCPP_INFO(this->get_logger(), 
-            "电机配置 - FL偏移: %.1f°, FR偏移: %.1f°, RL偏移: %.1f°, RR偏移: %.1f°",
-            motor_config_.fl_steer_offset, motor_config_.fr_steer_offset,
-            motor_config_.rl_steer_offset, motor_config_.rr_steer_offset);
-        
-        // 初始化时间戳（必须在创建订阅者之前，确保时间源一致）
-        last_cmd_time_ = this->now();
-        
-        // 创建订阅者
-        cmd_vel_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
-            cmd_vel_topic_, 10,
-            std::bind(&ChassisControlNode::cmdVelCallback, this, std::placeholders::_1)
-        );
-        
-        motor_state_sub_ = this->create_subscription<motor_control_ros2::msg::DJIMotorState>(
-            "/dji_motor_states", 10,
-            std::bind(&ChassisControlNode::motorStateCallback, this, std::placeholders::_1)
-        );
-        
-        // 创建发布者
-        motor_cmd_pub_ = this->create_publisher<motor_control_ros2::msg::DJIMotorCommandAdvanced>(
-            "/dji_motor_command_advanced", 10
-        );
-        
-        chassis_state_pub_ = this->create_publisher<motor_control_ros2::msg::ChassisState>(
-            "/chassis_state", 10
-        );
-        
-        // 创建控制循环定时器
-        auto period = std::chrono::duration<double>(1.0 / control_frequency_);
-        control_timer_ = this->create_wall_timer(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(period),
-            std::bind(&ChassisControlNode::controlLoop, this)
-        );
-        
-        RCLCPP_INFO(this->get_logger(), "底盘控制循环启动 - 频率: %.1f Hz", control_frequency_);
-        RCLCPP_INFO(this->get_logger(), "底盘速度输入: %s", cmd_vel_topic_.c_str());
+  ChassisControlNode() : Node("chassis_control_node") {
+    this->declare_parameter<std::string>("config_file", "");
+    std::string config_file = this->get_parameter("config_file").as_string();
+    if (config_file.empty()) {
+      config_file = ament_index_cpp::get_package_share_directory("motor_control_ros2") +
+                    "/config/chassis_params.yaml";
     }
+    loadChassisParams(config_file);
+
+    const auto now = this->now();
+    last_cmd_time_ = now;
+    last_estop_time_ = now;
+    last_control_time_ = now;
+
+    cmd_vel_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
+      cmd_vel_topic_, 10,
+      std::bind(&ChassisControlNode::cmdVelCallback, this, std::placeholders::_1));
+    motor_state_sub_ = this->create_subscription<msg::DJIMotorState>(
+      motor_state_topic_, 32,
+      std::bind(&ChassisControlNode::motorStateCallback, this, std::placeholders::_1));
+    estop_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+      estop_topic_, 10,
+      std::bind(&ChassisControlNode::estopCallback, this, std::placeholders::_1));
+
+    motor_cmd_pub_ = this->create_publisher<msg::DJIMotorCommandAdvanced>(motor_command_topic_, 32);
+    chassis_state_pub_ = this->create_publisher<msg::ChassisState>(chassis_state_topic_, 10);
+    limited_cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>(limited_cmd_topic_, 10);
+
+    const auto period = std::chrono::duration<double>(1.0 / control_frequency_);
+    control_timer_ = this->create_wall_timer(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(period),
+      std::bind(&ChassisControlNode::controlLoop, this));
+
+    RCLCPP_INFO(this->get_logger(),
+      "四舵轮控制启动: %.1f Hz, input=%s, limited=%s, estop=%s, watchdog=%.3fs",
+      control_frequency_, cmd_vel_topic_.c_str(), limited_cmd_topic_.c_str(),
+      estop_topic_.c_str(), command_watchdog_s_);
+  }
 
 private:
-    // 电机名称映射
-    struct MotorNames {
-        std::string fl_steer, fl_drive;
-        std::string fr_steer, fr_drive;
-        std::string rl_steer, rl_drive;
-        std::string rr_steer, rr_drive;
+  struct ModuleConfig {
+    std::string id;
+    std::string steer_motor;
+    std::string drive_motor;
+    double steer_offset_deg {0.0};
+    int steer_direction {1};
+    int drive_direction {1};
+  };
+
+  struct BodyCommand {
+    double vx {0.0};
+    double vy {0.0};
+    double wz {0.0};
+  };
+
+  void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr input) {
+    if (!std::isfinite(input->linear.x) || !std::isfinite(input->linear.y) ||
+        !std::isfinite(input->angular.z)) {
+      requested_ = {};
+      command_received_ = false;
+      RCLCPP_ERROR(this->get_logger(), "拒绝非有限底盘命令并执行安全停车");
+      return;
+    }
+    requested_.vx = input->linear.x;
+    requested_.vy = input->linear.y;
+    requested_.wz = input->angular.z;
+    last_cmd_time_ = this->now();
+    command_received_ = true;
+  }
+
+  void motorStateCallback(const msg::DJIMotorState::SharedPtr state) {
+    motor_states_[state->joint_name] = *state;
+    motor_state_times_[state->joint_name] = this->now();
+  }
+
+  void estopCallback(const std_msgs::msg::Bool::SharedPtr state) {
+    estop_active_ = state->data;
+    estop_received_ = true;
+    last_estop_time_ = this->now();
+  }
+
+  static double clampDelta(double target, double current, double maximum_delta) {
+    return current + std::clamp(target - current, -maximum_delta, maximum_delta);
+  }
+
+  BodyCommand limitBodyVelocity(const BodyCommand& input) const {
+    BodyCommand output = input;
+    const double normalized = std::hypot(output.vx / max_vx_m_s_, output.vy / max_vy_m_s_);
+    if (normalized > 1.0) {
+      output.vx /= normalized;
+      output.vy /= normalized;
+    }
+    output.wz = std::clamp(output.wz, -max_wz_rad_s_, max_wz_rad_s_);
+    return output;
+  }
+
+  BodyCommand slewBodyVelocity(const BodyCommand& target, double dt) const {
+    return {
+      clampDelta(target.vx, applied_.vx, max_ax_m_s2_ * dt),
+      clampDelta(target.vy, applied_.vy, max_ay_m_s2_ * dt),
+      clampDelta(target.wz, applied_.wz, max_awz_rad_s2_ * dt)
     };
-    
-    // 电机配置（零位偏移和方向）
-    struct MotorConfig {
-        double fl_steer_offset, fr_steer_offset, rl_steer_offset, rr_steer_offset;  // 转向零位偏移（度）
-        int fl_steer_direction, fr_steer_direction, rl_steer_direction, rr_steer_direction;  // 舵轮方向 (1 或 -1)
-        int fl_drive_direction, fr_drive_direction, rl_drive_direction, rr_drive_direction;  // 驱动方向 (1 或 -1)
+  }
+
+  bool stateFresh(const std::string& name, const rclcpp::Time& now) const {
+    const auto it = motor_state_times_.find(name);
+    return it != motor_state_times_.end() &&
+           (now - it->second).seconds() <= motor_state_watchdog_s_;
+  }
+
+  bool motorFault(const std::string& name, const rclcpp::Time& now) const {
+    const auto it = motor_states_.find(name);
+    if (it == motor_states_.end() || !stateFresh(name, now) || !it->second.online) {
+      return true;
+    }
+    return !std::isfinite(it->second.angle) ||
+           it->second.temperature >= fault_temperature_c_ ||
+           std::abs(static_cast<int>(it->second.current)) >= fault_current_abs_;
+  }
+
+  bool allMotorsHealthy(const rclcpp::Time& now) const {
+    for (const auto& module : modules_) {
+      if (motorFault(module.steer_motor, now) || motorFault(module.drive_motor, now)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool allMotorsOnline(const rclcpp::Time& now) const {
+    for (const auto& module : modules_) {
+      for (const auto& name : {module.steer_motor, module.drive_motor}) {
+        const auto it = motor_states_.find(name);
+        if (it == motor_states_.end() || !it->second.online || !stateFresh(name, now)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  std::size_t moduleIndex(const ModuleConfig& module) const {
+    return static_cast<std::size_t>(&module - modules_.data());
+  }
+
+  double measuredSteerDeg(const ModuleConfig& module) const {
+    const auto it = motor_states_.find(module.steer_motor);
+    if (it == motor_states_.end()) {
+      return last_commands_[moduleIndex(module)].angle;
+    }
+    return SteerWheelKinematics::normalizeAngle(
+      (it->second.angle - module.steer_offset_deg) * module.steer_direction);
+  }
+
+  double measuredDriveMps(const ModuleConfig& module) const {
+    const auto it = motor_states_.find(module.drive_motor);
+    if (it == motor_states_.end()) {
+      return 0.0;
+    }
+    return static_cast<double>(it->second.rpm) * (2.0 * M_PI / 60.0) *
+           wheel_radius_ * module.drive_direction;
+  }
+
+  void controlLoop() {
+    const auto now = this->now();
+    double dt = (now - last_control_time_).seconds();
+    last_control_time_ = now;
+    if (!std::isfinite(dt) || dt <= 0.0 || dt > 0.1) {
+      dt = 1.0 / control_frequency_;
+    }
+
+    command_timed_out_ = !command_received_ ||
+      (now - last_cmd_time_).seconds() > command_watchdog_s_;
+    const bool estop_timeout = require_estop_heartbeat_ &&
+      (!estop_received_ || (now - last_estop_time_).seconds() > estop_watchdog_s_);
+    const bool motors_online = allMotorsOnline(now);
+    const bool motors_healthy = allMotorsHealthy(now);
+    estop_effective_ = estop_active_ || estop_timeout;
+    safety_stop_ = command_timed_out_ || estop_effective_ || !motors_healthy;
+
+    if (safety_stop_) {
+      applied_ = {};
+    } else {
+      applied_ = limitBodyVelocity(slewBodyVelocity(limitBodyVelocity(requested_), dt));
+    }
+
+    std::array<WheelCommand, 4> commands;
+    std::array<bool, 4> steer_saturated {false, false, false, false};
+    std::array<bool, 4> drive_saturated {false, false, false, false};
+    const bool has_motion = std::hypot(applied_.vx, applied_.vy) > velocity_deadband_ ||
+                            std::abs(applied_.wz) > angular_deadband_;
+
+    if (has_motion && !safety_stop_) {
+      kinematics_->inverseKinematics(applied_.vx, applied_.vy, applied_.wz,
+        commands[0], commands[1], commands[2], commands[3]);
+      double peak = 0.0;
+      for (const auto& command : commands) peak = std::max(peak, std::abs(command.velocity));
+      if (peak > max_wheel_speed_m_s_) {
+        const double scale = max_wheel_speed_m_s_ / peak;
+        applied_.vx *= scale;
+        applied_.vy *= scale;
+        applied_.wz *= scale;
+        kinematics_->inverseKinematics(applied_.vx, applied_.vy, applied_.wz,
+          commands[0], commands[1], commands[2], commands[3]);
+        drive_saturated.fill(true);
+      }
+    } else {
+      for (std::size_t i = 0; i < modules_.size(); ++i) {
+        commands[i].angle = measuredSteerDeg(modules_[i]);
+        commands[i].velocity = 0.0;
+        drive_saturated[i] = safety_stop_ &&
+          (std::hypot(requested_.vx, requested_.vy) > velocity_deadband_ ||
+           std::abs(requested_.wz) > angular_deadband_);
+      }
+    }
+
+    if (has_motion && !safety_stop_) {
+      for (std::size_t i = 0; i < modules_.size(); ++i) {
+        const double current = measuredSteerDeg(modules_[i]);
+        const double ideal = commands[i].angle;
+        double optimized = SteerWheelKinematics::optimizeSteerAngle(
+          current, ideal, commands[i].velocity);
+        const double target_error = SteerWheelKinematics::angleDifference(optimized, current);
+        const double max_step = max_steer_rate_deg_s_ * dt;
+        if (std::abs(target_error) > max_step) {
+          optimized = SteerWheelKinematics::normalizeAngle(
+            current + std::clamp(target_error, -max_step, max_step));
+          steer_saturated[i] = true;
+        }
+        const double alignment_error = std::abs(target_error);
+        if (cosine_compensation_) {
+          const double cosine = std::max(0.0, std::cos(alignment_error * M_PI / 180.0));
+          commands[i].velocity *= cosine;
+          drive_saturated[i] = drive_saturated[i] || cosine < 0.999;
+        }
+        if (std::abs(target_error) > steer_alignment_stop_deg_) {
+          commands[i].velocity = 0.0;
+          drive_saturated[i] = true;
+        }
+        commands[i].angle = optimized;
+      }
+    }
+
+    last_commands_ = commands;
+    publishMotorCommands(commands, now);
+    publishLimitedCommand();
+    publishChassisState(commands, steer_saturated, drive_saturated,
+      motors_online, motors_healthy, now);
+
+    if (safety_stop_) {
+      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+        "底盘安全停车: command_timeout=%s estop=%s all_motors_healthy=%s",
+        command_timed_out_ ? "true" : "false", estop_effective_ ? "true" : "false",
+        motors_healthy ? "true" : "false");
+    }
+  }
+
+  void publishMotorCommands(const std::array<WheelCommand, 4>& commands,
+                            const rclcpp::Time& stamp) {
+    for (std::size_t i = 0; i < modules_.size(); ++i) {
+      const auto& module = modules_[i];
+      msg::DJIMotorCommandAdvanced steer;
+      steer.header.stamp = stamp;
+      steer.joint_name = module.steer_motor;
+      steer.mode = msg::DJIMotorCommandAdvanced::MODE_POSITION;
+      const double encoder_deg = commands[i].angle * module.steer_direction +
+                                 module.steer_offset_deg;
+      steer.position_target = encoder_deg * M_PI / 180.0;
+      motor_cmd_pub_->publish(steer);
+
+      msg::DJIMotorCommandAdvanced drive;
+      drive.header.stamp = stamp;
+      drive.joint_name = module.drive_motor;
+      drive.mode = msg::DJIMotorCommandAdvanced::MODE_VELOCITY;
+      drive.velocity_target = commands[i].velocity / wheel_radius_ * module.drive_direction;
+      motor_cmd_pub_->publish(drive);
+    }
+  }
+
+  void publishLimitedCommand() {
+    geometry_msgs::msg::Twist output;
+    output.linear.x = applied_.vx;
+    output.linear.y = applied_.vy;
+    output.angular.z = applied_.wz;
+    limited_cmd_pub_->publish(output);
+  }
+
+  void fillWheelState(msg::SteerWheelState& output, const ModuleConfig& module,
+                      const WheelCommand& command, bool steer_saturated,
+                      bool drive_saturated, const rclcpp::Time& now) const {
+    output.steer_motor_name = module.steer_motor;
+    output.drive_motor_name = module.drive_motor;
+    output.steer_angle = measuredSteerDeg(module);
+    output.steer_angle_target = command.angle;
+    output.drive_velocity = measuredDriveMps(module);
+    output.drive_velocity_target = command.velocity;
+    const auto steer = motor_states_.find(module.steer_motor);
+    const auto drive = motor_states_.find(module.drive_motor);
+    output.steer_online = steer != motor_states_.end() && steer->second.online &&
+                          stateFresh(module.steer_motor, now);
+    output.drive_online = drive != motor_states_.end() && drive->second.online &&
+                          stateFresh(module.drive_motor, now);
+    output.steer_saturated = steer_saturated;
+    output.drive_saturated = drive_saturated;
+    output.steer_fault = motorFault(module.steer_motor, now);
+    output.drive_fault = motorFault(module.drive_motor, now);
+    if (steer != motor_states_.end()) {
+      output.steer_current = steer->second.current;
+      output.steer_temperature = steer->second.temperature;
+    }
+    if (drive != motor_states_.end()) {
+      output.drive_current = drive->second.current;
+      output.drive_temperature = drive->second.temperature;
+    }
+  }
+
+  void publishChassisState(const std::array<WheelCommand, 4>& commands,
+                           const std::array<bool, 4>& steer_saturated,
+                           const std::array<bool, 4>& drive_saturated,
+                           bool motors_online, bool motors_healthy,
+                           const rclcpp::Time& now) {
+    msg::ChassisState output;
+    output.header.stamp = now;
+    output.header.frame_id = base_frame_;
+    output.requested_linear_x = requested_.vx;
+    output.requested_linear_y = requested_.vy;
+    output.requested_angular_z = requested_.wz;
+    output.command_linear_x = applied_.vx;
+    output.command_linear_y = applied_.vy;
+    output.command_angular_z = applied_.wz;
+    output.all_motors_online = motors_online;
+    output.all_motors_healthy = motors_healthy;
+    output.command_timed_out = command_timed_out_;
+    output.estop_active = estop_effective_;
+    output.safety_stop = safety_stop_;
+
+    std::array<WheelCommand, 4> actual;
+    if (motors_healthy) {
+      for (std::size_t i = 0; i < modules_.size(); ++i) {
+        actual[i].angle = measuredSteerDeg(modules_[i]);
+        actual[i].velocity = measuredDriveMps(modules_[i]);
+      }
+      kinematics_->forwardKinematics(actual[0], actual[1], actual[2], actual[3],
+        output.linear_x, output.linear_y, output.angular_z);
+    }
+    fillWheelState(output.fl_wheel, modules_[0], commands[0],
+      steer_saturated[0], drive_saturated[0], now);
+    fillWheelState(output.fr_wheel, modules_[1], commands[1],
+      steer_saturated[1], drive_saturated[1], now);
+    fillWheelState(output.rl_wheel, modules_[2], commands[2],
+      steer_saturated[2], drive_saturated[2], now);
+    fillWheelState(output.rr_wheel, modules_[3], commands[3],
+      steer_saturated[3], drive_saturated[3], now);
+    chassis_state_pub_->publish(output);
+  }
+
+  void loadChassisParams(const std::string& path) {
+    const YAML::Node root = YAML::LoadFile(path);
+    if (!root["chassis_control_node"] || !root["chassis_control_node"]["ros__parameters"]) {
+      throw std::runtime_error("缺少 chassis_control_node/ros__parameters");
+    }
+    const auto p = root["chassis_control_node"]["ros__parameters"];
+    auto required_double = [&p](const char* key) {
+      if (!p[key]) throw std::runtime_error(std::string("缺少参数: ") + key);
+      const double value = p[key].as<double>();
+      if (!std::isfinite(value) || value <= 0.0) {
+        throw std::runtime_error(std::string("参数必须为正有限数: ") + key);
+      }
+      return value;
     };
-    
-    // 底盘速度命令回调
-    void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
-        // 对平移速度做矢量限幅，避免 x/y 分量分别限幅后，
-        // 斜向合速度超过 max_linear_velocity_。
-        double limited_vx = msg->linear.x;
-        double limited_vy = msg->linear.y;
-        const double linear_speed = std::hypot(limited_vx, limited_vy);
-        if (linear_speed > max_linear_velocity_ && linear_speed > 1e-9) {
-            const double scale = max_linear_velocity_ / linear_speed;
-            limited_vx *= scale;
-            limited_vy *= scale;
-        }
+    auto string_or = [&p](const char* key, const std::string& fallback) {
+      return p[key] ? p[key].as<std::string>() : fallback;
+    };
+    auto double_or = [&p](const char* key, double fallback) {
+      return p[key] ? p[key].as<double>() : fallback;
+    };
+    auto bool_or = [&p](const char* key, bool fallback) {
+      return p[key] ? p[key].as<bool>() : fallback;
+    };
 
-        // 限制速度
-        cmd_vx_ = limited_vx;
-        cmd_vy_ = limited_vy;
-        cmd_wz_ = std::clamp(msg->angular.z, -max_angular_velocity_, max_angular_velocity_);
-        
-        last_cmd_time_ = this->now();
+    control_frequency_ = required_double("control_frequency");
+    wheel_base_x_ = required_double("wheel_base_x");
+    wheel_base_y_ = required_double("wheel_base_y");
+    wheel_radius_ = required_double("wheel_radius");
+    const double legacy_linear = required_double("max_linear_velocity");
+    max_vx_m_s_ = double_or("max_vx_m_s", legacy_linear);
+    max_vy_m_s_ = double_or("max_vy_m_s", legacy_linear);
+    max_wz_rad_s_ = p["max_wz_rad_s"] ? p["max_wz_rad_s"].as<double>() :
+                        required_double("max_angular_velocity");
+    max_wheel_speed_m_s_ = double_or("max_wheel_speed_m_s", legacy_linear);
+    max_ax_m_s2_ = required_double("max_ax_m_s2");
+    max_ay_m_s2_ = required_double("max_ay_m_s2");
+    max_awz_rad_s2_ = required_double("max_awz_rad_s2");
+    max_steer_rate_deg_s_ = required_double("max_steer_rate_deg_s");
+    command_watchdog_s_ = required_double("command_watchdog_s");
+    motor_state_watchdog_s_ = required_double("motor_state_watchdog_s");
+    estop_watchdog_s_ = required_double("estop_watchdog_s");
+    steer_alignment_stop_deg_ = required_double("steer_alignment_stop_deg");
+    velocity_deadband_ = double_or("velocity_deadband_m_s", 0.01);
+    angular_deadband_ = double_or("angular_deadband_rad_s", 0.01);
+    fault_temperature_c_ = static_cast<int>(double_or("fault_temperature_c", 80.0));
+    fault_current_abs_ = static_cast<int>(double_or("fault_current_abs", 15000.0));
+    cosine_compensation_ = bool_or("cosine_compensation", true);
+    require_estop_heartbeat_ = bool_or("require_estop_heartbeat", true);
+    for (const auto value : {max_vx_m_s_, max_vy_m_s_, max_wz_rad_s_,
+                             max_wheel_speed_m_s_, max_ax_m_s2_, max_ay_m_s2_,
+                             max_awz_rad_s2_, max_steer_rate_deg_s_, command_watchdog_s_,
+                             motor_state_watchdog_s_, estop_watchdog_s_,
+                             steer_alignment_stop_deg_}) {
+      if (!std::isfinite(value) || value <= 0.0) {
+        throw std::runtime_error("速度、加速度、舵速和看门狗参数必须为正有限数");
+      }
     }
-    
-    // 电机状态回调（用于里程计）
-    void motorStateCallback(const motor_control_ros2::msg::DJIMotorState::SharedPtr msg) {
-        // 存储电机状态
-        motor_states_[msg->joint_name] = *msg;
+    if (steer_alignment_stop_deg_ > 90.0 || fault_temperature_c_ <= 0 ||
+        fault_current_abs_ <= 0 || !std::isfinite(velocity_deadband_) ||
+        !std::isfinite(angular_deadband_) || velocity_deadband_ < 0.0 ||
+        angular_deadband_ < 0.0) {
+      throw std::runtime_error("对准、故障或死区参数非法");
     }
-    
-    // 控制循环
-    void controlLoop() {
-        // 检查命令超时（500ms）
-        auto now = this->now();
-        if ((now - last_cmd_time_).seconds() > 0.5) {
-            cmd_vx_ = 0.0;
-            cmd_vy_ = 0.0;
-            cmd_wz_ = 0.0;
-        }
-        
-        // 判断是否有实际运动命令（速度阈值：0.01 m/s 或 0.01 rad/s）
-        const double velocity_threshold = 0.01;
-        bool has_motion = (std::abs(cmd_vx_) > velocity_threshold) ||
-                         (std::abs(cmd_vy_) > velocity_threshold) ||
-                         (std::abs(cmd_wz_) > velocity_threshold);
-        
-        // 只在有运动命令时才执行控制
-        WheelCommand fl_cmd, fr_cmd, rl_cmd, rr_cmd;
-        
-        if (!has_motion) {
-            // 无运动命令时：所有舵轮转到机械零位（正前方，0 度）
-            // 注意：这里的 angle 是机械角度，后续会加上 offset 转换为编码器角度
-            fl_cmd.angle = 0.0;  // 机械零位 = 0 度（正前方）
-            fl_cmd.velocity = 0.0;
-            
-            fr_cmd.angle = 0.0;
-            fr_cmd.velocity = 0.0;
-            
-            rl_cmd.angle = 0.0;
-            rl_cmd.velocity = 0.0;
-            
-            rr_cmd.angle = 0.0;
-            rr_cmd.velocity = 0.0;
-        } else {
-            // 有运动命令：执行逆运动学解算（得到机械角度）
-            kinematics_->inverseKinematics(
-                cmd_vx_, cmd_vy_, cmd_wz_,
-                fl_cmd, fr_cmd, rl_cmd, rr_cmd
-            );
 
-            // 对组合运动做轮速统一缩放，确保任一轮子的目标线速度
-            // 都不会超过底盘允许的最大轮速能力。
-            const double max_wheel_speed = std::max({
-                std::abs(fl_cmd.velocity),
-                std::abs(fr_cmd.velocity),
-                std::abs(rl_cmd.velocity),
-                std::abs(rr_cmd.velocity)
-            });
-            if (max_wheel_speed > max_linear_velocity_ && max_wheel_speed > 1e-9) {
-                const double scale = max_linear_velocity_ / max_wheel_speed;
-                fl_cmd.velocity *= scale;
-                fr_cmd.velocity *= scale;
-                rl_cmd.velocity *= scale;
-                rr_cmd.velocity *= scale;
-            }
-        
-            // 舵角优化（最短路径）
-            // 坐标转换说明：
-            // - offset: 机械零位(正前方)时的编码器角度
-            // - 机械角度 = 编码器角度 - offset
-            // - 编码器角度 = 机械角度 + offset
-            
-            if (motor_states_.count(motor_names_.fl_steer)) {
-                // 将编码器角度转换为机械角度
-                double current_mechanical_angle = motor_states_[motor_names_.fl_steer].angle - motor_config_.fl_steer_offset;
-                // 应用舵轮方向
-                double target_angle = fl_cmd.angle * motor_config_.fl_steer_direction;
-                // 优化舵角（输入输出都是机械角度）
-                fl_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
-                    current_mechanical_angle, target_angle, fl_cmd.velocity
-                );
-            }
-            
-            if (motor_states_.count(motor_names_.fr_steer)) {
-                double current_mechanical_angle = motor_states_[motor_names_.fr_steer].angle - motor_config_.fr_steer_offset;
-                // 应用舵轮方向
-                double target_angle = fr_cmd.angle * motor_config_.fr_steer_direction;
-                fr_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
-                    current_mechanical_angle, target_angle, fr_cmd.velocity
-                );
-            }
-            
-            if (motor_states_.count(motor_names_.rl_steer)) {
-                double current_mechanical_angle = motor_states_[motor_names_.rl_steer].angle - motor_config_.rl_steer_offset;
-                // 应用舵轮方向
-                double target_angle = rl_cmd.angle * motor_config_.rl_steer_direction;
-                rl_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
-                    current_mechanical_angle, target_angle, rl_cmd.velocity
-                );
-            }
-            
-            if (motor_states_.count(motor_names_.rr_steer)) {
-                double current_mechanical_angle = motor_states_[motor_names_.rr_steer].angle - motor_config_.rr_steer_offset;
-                // 应用舵轮方向
-                double target_angle = rr_cmd.angle * motor_config_.rr_steer_direction;
-                rr_cmd.angle = SteerWheelKinematics::optimizeSteerAngle(
-                    current_mechanical_angle, target_angle, rr_cmd.velocity
-                );
-            }
-        }
-        
-        // 发布电机命令
-        publishMotorCommands(fl_cmd, fr_cmd, rl_cmd, rr_cmd);
-        
-        // 发布底盘状态
-        publishChassisState(fl_cmd, fr_cmd, rl_cmd, rr_cmd);
-    }
-    
-    // 发布电机命令
-    void publishMotorCommands(
-        const WheelCommand& fl, const WheelCommand& fr,
-        const WheelCommand& rl, const WheelCommand& rr)
-    {
-        auto now = this->now();
-        
-        // 左前舵轮
-        publishWheelCommand(motor_names_.fl_steer, motor_names_.fl_drive, fl, now,
-                           motor_config_.fl_steer_offset, motor_config_.fl_drive_direction);
-        
-        // 右前舵轮
-        publishWheelCommand(motor_names_.fr_steer, motor_names_.fr_drive, fr, now,
-                           motor_config_.fr_steer_offset, motor_config_.fr_drive_direction);
-        
-        // 左后舵轮
-        publishWheelCommand(motor_names_.rl_steer, motor_names_.rl_drive, rl, now,
-                           motor_config_.rl_steer_offset, motor_config_.rl_drive_direction);
-        
-        // 右后舵轮
-        publishWheelCommand(motor_names_.rr_steer, motor_names_.rr_drive, rr, now,
-                           motor_config_.rr_steer_offset, motor_config_.rr_drive_direction);
-    }
-    
-    // 发布单个舵轮命令
-    void publishWheelCommand(
-        const std::string& steer_name,
-        const std::string& drive_name,
-        const WheelCommand& cmd,
-        const rclcpp::Time& timestamp,
-        double steer_offset,
-        int drive_direction)
-    {
-        // 转向电机命令（位置控制）
-        auto steer_msg = motor_control_ros2::msg::DJIMotorCommandAdvanced();
-        steer_msg.header.stamp = timestamp;
-        steer_msg.joint_name = steer_name;
-        steer_msg.mode = motor_control_ros2::msg::DJIMotorCommandAdvanced::MODE_POSITION;
-        
-        // 坐标转换: 机械角度 -> 编码器角度
-        // cmd.angle 是机械角度(运动学计算结果)
-        // steer_offset 是机械零位时的编码器角度
-        // 编码器目标角度 = 机械角度 + offset
-        double encoder_angle_deg = cmd.angle + steer_offset;
-        steer_msg.position_target = encoder_angle_deg * M_PI / 180.0;  // 转换为弧度
-        motor_cmd_pub_->publish(steer_msg);
-        
-        // 驱动电机命令（速度控制）- 应用方向修正
-        // 将线速度转换为 RPM
-        double rpm = (cmd.velocity / (2.0 * M_PI * wheel_radius_)) * 60.0;
-        
-        auto drive_msg = motor_control_ros2::msg::DJIMotorCommandAdvanced();
-        drive_msg.header.stamp = timestamp;
-        drive_msg.joint_name = drive_name;
-        drive_msg.mode = motor_control_ros2::msg::DJIMotorCommandAdvanced::MODE_VELOCITY;
-        // 应用方向修正：1=正转向前，-1=正转向后
-        drive_msg.velocity_target = rpm * M_PI / 30.0 * drive_direction;  // 转换为弧度/秒并应用方向
-        motor_cmd_pub_->publish(drive_msg);
-    }
-    
-    // 发布底盘状态
-    void publishChassisState(
-        const WheelCommand& fl, const WheelCommand& fr,
-        const WheelCommand& rl, const WheelCommand& rr)
-    {
-        auto msg = motor_control_ros2::msg::ChassisState();
-        msg.header.stamp = this->now();
-        
-        // 从轮子状态计算底盘速度（正运动学）
-        WheelCommand fl_actual, fr_actual, rl_actual, rr_actual;
-        
-        // 从电机反馈获取实际轮子状态
-        if (motor_states_.count(motor_names_.fl_steer) && 
-            motor_states_.count(motor_names_.fl_drive)) {
-            fl_actual.angle = motor_states_[motor_names_.fl_steer].angle;
-            fl_actual.velocity = motor_states_[motor_names_.fl_drive].rpm * 0.055;  // RPM to m/s
-        }
-        
-        // ... 类似处理其他轮子 ...
-        
-        // 正运动学
-        kinematics_->forwardKinematics(
-            fl_actual, fr_actual, rl_actual, rr_actual,
-            msg.linear_x, msg.linear_y, msg.angular_z
-        );
-        
-        // 填充舵轮状态
-        fillWheelState(msg.fl_wheel, motor_names_.fl_steer, motor_names_.fl_drive, fl);
-        fillWheelState(msg.fr_wheel, motor_names_.fr_steer, motor_names_.fr_drive, fr);
-        fillWheelState(msg.rl_wheel, motor_names_.rl_steer, motor_names_.rl_drive, rl);
-        fillWheelState(msg.rr_wheel, motor_names_.rr_steer, motor_names_.rr_drive, rr);
-        
-        chassis_state_pub_->publish(msg);
-    }
-    
-    // 填充舵轮状态
-    void fillWheelState(
-        motor_control_ros2::msg::SteerWheelState& wheel_state,
-        const std::string& steer_name,
-        const std::string& drive_name,
-        const WheelCommand& cmd)
-    {
-        wheel_state.steer_motor_name = steer_name;
-        wheel_state.drive_motor_name = drive_name;
-        wheel_state.steer_angle_target = cmd.angle;
-        wheel_state.drive_velocity_target = cmd.velocity;
-        
-        // 从电机状态获取当前值
-        if (motor_states_.count(steer_name)) {
-            wheel_state.steer_angle = motor_states_[steer_name].angle;
-        }
-        
-        if (motor_states_.count(drive_name)) {
-            wheel_state.drive_velocity = motor_states_[drive_name].rpm * wheel_radius_;  // RPM to m/s
-        }
-    }
-    
-    /**
-     * @brief 从 YAML 配置文件加载底盘参数
-     */
-    void loadChassisParams(const std::string& config_file) {
-        YAML::Node config = YAML::LoadFile(config_file);
-        
-        if (!config["chassis_control_node"] || !config["chassis_control_node"]["ros__parameters"]) {
-            throw std::runtime_error("配置文件格式错误: 缺少 chassis_control_node/ros__parameters 节点");
-        }
-        
-        auto params = config["chassis_control_node"]["ros__parameters"];
-        
-        // 读取控制参数
-        if (!params["control_frequency"]) {
-            throw std::runtime_error("配置文件缺少必需参数: control_frequency");
-        }
-        control_frequency_ = params["control_frequency"].as<double>();
-        
-        if (!params["wheel_base_x"]) {
-            throw std::runtime_error("配置文件缺少必需参数: wheel_base_x");
-        }
-        wheel_base_x_ = params["wheel_base_x"].as<double>();
-        
-        if (!params["wheel_base_y"]) {
-            throw std::runtime_error("配置文件缺少必需参数: wheel_base_y");
-        }
-        wheel_base_y_ = params["wheel_base_y"].as<double>();
-        
-        if (!params["wheel_radius"]) {
-            throw std::runtime_error("配置文件缺少必需参数: wheel_radius");
-        }
-        wheel_radius_ = params["wheel_radius"].as<double>();
-        
-        if (!params["max_linear_velocity"]) {
-            throw std::runtime_error("配置文件缺少必需参数: max_linear_velocity");
-        }
-        max_linear_velocity_ = params["max_linear_velocity"].as<double>();
-        
-        if (!params["max_angular_velocity"]) {
-            throw std::runtime_error("配置文件缺少必需参数: max_angular_velocity");
-        }
-        max_angular_velocity_ = params["max_angular_velocity"].as<double>();
+    cmd_vel_topic_ = string_or("cmd_vel_topic", "/cmd_vel");
+    limited_cmd_topic_ = string_or("limited_cmd_topic", "/chassis/limited_cmd");
+    estop_topic_ = string_or("estop_topic", "/emergency_stop");
+    motor_state_topic_ = string_or("motor_state_topic", "/dji_motor_states");
+    motor_command_topic_ = string_or("motor_command_topic", "/dji_motor_command_advanced");
+    chassis_state_topic_ = string_or("chassis_state_topic", "/chassis_state");
+    base_frame_ = string_or("base_frame", "base_link");
 
-        if (params["cmd_vel_topic"]) {
-            cmd_vel_topic_ = params["cmd_vel_topic"].as<std::string>();
-        }
-        
-        // 读取电机映射和配置 - 左前
-        if (!params["fl_steer_motor"]) throw std::runtime_error("配置文件缺少必需参数: fl_steer_motor");
-        motor_names_.fl_steer = params["fl_steer_motor"].as<std::string>();
-        
-        if (!params["fl_drive_motor"]) throw std::runtime_error("配置文件缺少必需参数: fl_drive_motor");
-        motor_names_.fl_drive = params["fl_drive_motor"].as<std::string>();
-        
-        if (!params["fl_steer_offset"]) throw std::runtime_error("配置文件缺少必需参数: fl_steer_offset");
-        motor_config_.fl_steer_offset = params["fl_steer_offset"].as<double>();
-        
-        if (!params["fl_steer_direction"]) throw std::runtime_error("配置文件缺少必需参数: fl_steer_direction");
-        motor_config_.fl_steer_direction = params["fl_steer_direction"].as<int>();
-        
-        if (!params["fl_drive_direction"]) throw std::runtime_error("配置文件缺少必需参数: fl_drive_direction");
-        motor_config_.fl_drive_direction = params["fl_drive_direction"].as<int>();
-        
-        // 读取电机映射和配置 - 右前
-        if (!params["fr_steer_motor"]) throw std::runtime_error("配置文件缺少必需参数: fr_steer_motor");
-        motor_names_.fr_steer = params["fr_steer_motor"].as<std::string>();
-        
-        if (!params["fr_drive_motor"]) throw std::runtime_error("配置文件缺少必需参数: fr_drive_motor");
-        motor_names_.fr_drive = params["fr_drive_motor"].as<std::string>();
-        
-        if (!params["fr_steer_offset"]) throw std::runtime_error("配置文件缺少必需参数: fr_steer_offset");
-        motor_config_.fr_steer_offset = params["fr_steer_offset"].as<double>();
-        
-        if (!params["fr_steer_direction"]) throw std::runtime_error("配置文件缺少必需参数: fr_steer_direction");
-        motor_config_.fr_steer_direction = params["fr_steer_direction"].as<int>();
-        
-        if (!params["fr_drive_direction"]) throw std::runtime_error("配置文件缺少必需参数: fr_drive_direction");
-        motor_config_.fr_drive_direction = params["fr_drive_direction"].as<int>();
-        
-        // 读取电机映射和配置 - 左后
-        if (!params["rl_steer_motor"]) throw std::runtime_error("配置文件缺少必需参数: rl_steer_motor");
-        motor_names_.rl_steer = params["rl_steer_motor"].as<std::string>();
-        
-        if (!params["rl_drive_motor"]) throw std::runtime_error("配置文件缺少必需参数: rl_drive_motor");
-        motor_names_.rl_drive = params["rl_drive_motor"].as<std::string>();
-        
-        if (!params["rl_steer_offset"]) throw std::runtime_error("配置文件缺少必需参数: rl_steer_offset");
-        motor_config_.rl_steer_offset = params["rl_steer_offset"].as<double>();
-        
-        if (!params["rl_steer_direction"]) throw std::runtime_error("配置文件缺少必需参数: rl_steer_direction");
-        motor_config_.rl_steer_direction = params["rl_steer_direction"].as<int>();
-        
-        if (!params["rl_drive_direction"]) throw std::runtime_error("配置文件缺少必需参数: rl_drive_direction");
-        motor_config_.rl_drive_direction = params["rl_drive_direction"].as<int>();
-        
-        // 读取电机映射和配置 - 右后
-        if (!params["rr_steer_motor"]) throw std::runtime_error("配置文件缺少必需参数: rr_steer_motor");
-        motor_names_.rr_steer = params["rr_steer_motor"].as<std::string>();
-        
-        if (!params["rr_drive_motor"]) throw std::runtime_error("配置文件缺少必需参数: rr_drive_motor");
-        motor_names_.rr_drive = params["rr_drive_motor"].as<std::string>();
-        
-        if (!params["rr_steer_offset"]) throw std::runtime_error("配置文件缺少必需参数: rr_steer_offset");
-        motor_config_.rr_steer_offset = params["rr_steer_offset"].as<double>();
-        
-        if (!params["rr_steer_direction"]) throw std::runtime_error("配置文件缺少必需参数: rr_steer_direction");
-        motor_config_.rr_steer_direction = params["rr_steer_direction"].as<int>();
-        
-        if (!params["rr_drive_direction"]) throw std::runtime_error("配置文件缺少必需参数: rr_drive_direction");
-        motor_config_.rr_drive_direction = params["rr_drive_direction"].as<int>();
-        
-        // 初始化运动学
-        kinematics_ = std::make_unique<SteerWheelKinematics>(
-            wheel_base_x_, wheel_base_y_, wheel_radius_
-        );
+    const std::array<std::string, 4> prefixes {"fl", "fr", "rl", "rr"};
+    const std::array<std::string, 4> ids {"front_left", "front_right", "rear_left", "rear_right"};
+    for (std::size_t i = 0; i < modules_.size(); ++i) {
+      const auto& prefix = prefixes[i];
+      modules_[i].id = ids[i];
+      modules_[i].steer_motor = p[prefix + "_steer_motor"].as<std::string>();
+      modules_[i].drive_motor = p[prefix + "_drive_motor"].as<std::string>();
+      modules_[i].steer_offset_deg = p[prefix + "_steer_offset"].as<double>();
+      modules_[i].steer_direction = p[prefix + "_steer_direction"].as<int>();
+      modules_[i].drive_direction = p[prefix + "_drive_direction"].as<int>();
+      if (std::abs(modules_[i].steer_direction) != 1 ||
+          std::abs(modules_[i].drive_direction) != 1) {
+        throw std::runtime_error(prefix + " direction 必须为 +/-1");
+      }
     }
-    
-    // 成员变量
-    std::unique_ptr<SteerWheelKinematics> kinematics_;
-    MotorNames motor_names_;
-    MotorConfig motor_config_;
-    
-    // 参数
-    double control_frequency_;
-    double wheel_base_x_;
-    double wheel_base_y_;
-    double wheel_radius_;
-    double max_linear_velocity_;
-    double max_angular_velocity_;
-    std::string cmd_vel_topic_ {"/cmd_vel"};
-    
-    // 底盘速度命令
-    double cmd_vx_ = 0.0;
-    double cmd_vy_ = 0.0;
-    double cmd_wz_ = 0.0;
-    rclcpp::Time last_cmd_time_;
-    
-    // 电机状态缓存
-    std::map<std::string, motor_control_ros2::msg::DJIMotorState> motor_states_;
-    
-    // ROS 接口
-    rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
-    rclcpp::Subscription<motor_control_ros2::msg::DJIMotorState>::SharedPtr motor_state_sub_;
-    rclcpp::Publisher<motor_control_ros2::msg::DJIMotorCommandAdvanced>::SharedPtr motor_cmd_pub_;
-    rclcpp::Publisher<motor_control_ros2::msg::ChassisState>::SharedPtr chassis_state_pub_;
-    rclcpp::TimerBase::SharedPtr control_timer_;
+    kinematics_ = std::make_unique<SteerWheelKinematics>(
+      wheel_base_x_, wheel_base_y_, wheel_radius_);
+  }
+
+  std::unique_ptr<SteerWheelKinematics> kinematics_;
+  std::array<ModuleConfig, 4> modules_;
+  std::array<WheelCommand, 4> last_commands_;
+  std::map<std::string, msg::DJIMotorState> motor_states_;
+  std::map<std::string, rclcpp::Time> motor_state_times_;
+  double control_frequency_ {100.0};
+  double wheel_base_x_ {0.0};
+  double wheel_base_y_ {0.0};
+  double wheel_radius_ {0.0};
+  double max_vx_m_s_ {0.0};
+  double max_vy_m_s_ {0.0};
+  double max_wz_rad_s_ {0.0};
+  double max_wheel_speed_m_s_ {0.0};
+  double max_ax_m_s2_ {0.0};
+  double max_ay_m_s2_ {0.0};
+  double max_awz_rad_s2_ {0.0};
+  double max_steer_rate_deg_s_ {0.0};
+  double command_watchdog_s_ {0.2};
+  double motor_state_watchdog_s_ {0.2};
+  double estop_watchdog_s_ {0.2};
+  double steer_alignment_stop_deg_ {60.0};
+  double velocity_deadband_ {0.01};
+  double angular_deadband_ {0.01};
+  int fault_temperature_c_ {80};
+  int fault_current_abs_ {15000};
+  bool cosine_compensation_ {true};
+  bool require_estop_heartbeat_ {true};
+  std::string cmd_vel_topic_;
+  std::string limited_cmd_topic_;
+  std::string estop_topic_;
+  std::string motor_state_topic_;
+  std::string motor_command_topic_;
+  std::string chassis_state_topic_;
+  std::string base_frame_ {"base_link"};
+  BodyCommand requested_;
+  BodyCommand applied_;
+  bool command_received_ {false};
+  bool estop_received_ {false};
+  bool estop_active_ {true};
+  bool estop_effective_ {true};
+  bool command_timed_out_ {true};
+  bool safety_stop_ {true};
+  rclcpp::Time last_cmd_time_;
+  rclcpp::Time last_estop_time_;
+  rclcpp::Time last_control_time_;
+  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
+  rclcpp::Subscription<msg::DJIMotorState>::SharedPtr motor_state_sub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr estop_sub_;
+  rclcpp::Publisher<msg::DJIMotorCommandAdvanced>::SharedPtr motor_cmd_pub_;
+  rclcpp::Publisher<msg::ChassisState>::SharedPtr chassis_state_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr limited_cmd_pub_;
+  rclcpp::TimerBase::SharedPtr control_timer_;
 };
 
-} // namespace motor_control
+}  // namespace motor_control
 
 int main(int argc, char** argv) {
-    rclcpp::init(argc, argv);
-    auto node = std::make_shared<motor_control::ChassisControlNode>();
-    rclcpp::spin(node);
-    rclcpp::shutdown();
-    return 0;
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<motor_control::ChassisControlNode>());
+  rclcpp::shutdown();
+  return 0;
 }

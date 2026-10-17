@@ -10,6 +10,7 @@
   
   <!-- C++ 依赖 -->
   <depend>rclcpp</depend>
+  <exec_depend>rclpy</exec_depend>
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>

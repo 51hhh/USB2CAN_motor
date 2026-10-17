@@ -5,6 +5,12 @@ chassis_control_node:
 
     # 底盘速度输入 topic（通常接 cmd_vel_mux_node 的 output_topic）
     cmd_vel_topic: "/cmd_vel"
+    limited_cmd_topic: "/chassis/limited_cmd"
+    estop_topic: "/emergency_stop"
+    motor_state_topic: "/dji_motor_states"
+    motor_command_topic: "/dji_motor_command_advanced"
+    chassis_state_topic: "/chassis_state"
+    base_frame: "base_link"
     
     # 底盘几何参数（根据用户提供的参数）
     wheel_base_x: 0.65    # 前后轮距 (m) - 650mm
@@ -16,6 +22,28 @@ chassis_control_node:
     # chassis_control_node 仍继续接受不现实的超大线速度命令。
     max_linear_velocity: 2.7     # 最大线速度 (m/s)
     max_angular_velocity: 6.0    # 最大角速度 (rad/s)
+    max_vx_m_s: 2.7              # G0 前仅为候选值，实车测试前必须复核
+    max_vy_m_s: 2.7
+    max_wz_rad_s: 6.0
+    max_wheel_speed_m_s: 2.7
+
+    # 命令与舵角安全限制（候选值；G0 后冻结实测值）
+    max_ax_m_s2: 1.5
+    max_ay_m_s2: 1.5
+    max_awz_rad_s2: 3.0
+    max_steer_rate_deg_s: 180.0
+    steer_alignment_stop_deg: 60.0
+    cosine_compensation: true
+
+    # 三层失效保护：命令、电机反馈和急停心跳任一超时均立即零驱动
+    command_watchdog_s: 0.20
+    motor_state_watchdog_s: 0.20
+    estop_watchdog_s: 0.20
+    require_estop_heartbeat: true
+    velocity_deadband_m_s: 0.01
+    angular_deadband_rad_s: 0.01
+    fault_temperature_c: 80
+    fault_current_abs: 15000
     
     # 电机映射（对应 motors.yaml 中的名称）
     # 左前舵轮单元
