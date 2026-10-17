@@ -1,0 +1,17 @@
+# 四舵轮真机模板。设备路径必须替换为稳定的 /dev/serial/by-id 路径后再启用；
+# 不能直接把该 pending 文件作为生产配置。
+can_interfaces:
+  - device: /dev/serial/by-id/REPLACE_WITH_STEERING_USB2CAN
+    baudrate: 921600
+    motors:
+      - {name: DJI6020_1, type: GM6020, id: 1}
+      - {name: DJI6020_2, type: GM6020, id: 2}
+      - {name: DJI6020_3, type: GM6020, id: 3}
+      - {name: DJI6020_4, type: GM6020, id: 4}
+  - device: /dev/serial/by-id/REPLACE_WITH_DRIVE_USB2CAN
+    baudrate: 921600
+    motors:
+      - {name: DJI3508_1, type: GM3508, id: 1}
+      - {name: DJI3508_2, type: GM3508, id: 2}
+      - {name: DJI3508_3, type: GM3508, id: 3}
+      - {name: DJI3508_4, type: GM3508, id: 4}

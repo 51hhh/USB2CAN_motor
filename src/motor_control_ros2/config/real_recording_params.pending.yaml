@@ -1,0 +1,17 @@
+real_swerve_recorder:
+  ros__parameters:
+    # 每次录制必须复制本模板并填写，不允许覆盖既有 CSV。
+    confirm_real_robot: false
+    session_id: ""
+    operator: ""
+    controller_version: ""
+    firmware_version: ""
+    chassis_manifest_sha256: ""
+    expected_odom_frame: "odom"
+    expected_base_frame: "base_link"
+    output_path: ""
+    duration_s: 30.0
+    wheel_radius_m: 0.0
+    max_sync_error_s: 0.03
+    chassis_state_topic: "/chassis_state"
+    odom_topic: "/odom"

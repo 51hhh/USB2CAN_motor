@@ -1,0 +1,20 @@
+rl_velocity_residual_node:
+  ros__parameters:
+    # pending=0 会让节点拒绝启动。只允许填入 G0 冻结后的实测限制。
+    max_vx_m_s: 0.0
+    max_vy_m_s: 0.0
+    max_wz_rad_s: 0.0
+    max_ax_m_s2: 0.0
+    max_ay_m_s2: 0.0
+    max_awz_rad_s2: 0.0
+    residual_fraction: 0.05
+    publish_rate_hz: 50.0
+    classic_watchdog_s: 0.20
+    residual_watchdog_s: 0.10
+    health_watchdog_s: 0.20
+    estop_watchdog_s: 0.20
+    classic_topic: "/cmd_vel_classic"
+    residual_topic: "/rl/swerve_residual_normalized"
+    chassis_state_topic: "/chassis_state"
+    estop_topic: "/emergency_stop"
+    output_topic: "/cmd_vel_remote"

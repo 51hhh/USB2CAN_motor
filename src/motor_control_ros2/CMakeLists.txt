@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.8)
 project(motor_control_ros2)
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 # 编译选项
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -18,6 +21,8 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(ament_index_cpp REQUIRED)
+
+include(CTest)
 
 
 
@@ -387,5 +392,26 @@ install(DIRECTORY
   config
   DESTINATION share/${PROJECT_NAME}
 )
+
+install(PROGRAMS
+  ../ROS_test/tools/rl_velocity_contract.py
+  ../ROS_test/tools/swerve_recording_contract.py
+  ../ROS_test/tools/rl_velocity_residual_node.py
+  ../ROS_test/tools/record_swerve_rl_data.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+if(BUILD_TESTING)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_executable(kinematics_smoke test/kinematics_smoke.cpp)
+  target_link_libraries(kinematics_smoke motor_control_lib)
+  add_test(NAME kinematics_smoke COMMAND kinematics_smoke)
+  add_test(
+    NAME rl_velocity_contract
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../ROS_test/test/test_rl_velocity_contract.py
+            -v
+  )
+endif()
 
 ament_package()
